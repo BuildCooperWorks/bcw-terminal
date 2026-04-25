@@ -286,3 +286,11 @@ src/
 - 独立した「クリア」ボタンをショートカット列から削除し、`編集` メニュー内の項目へ移動（`cls` 送信動作は変更なし）。
 - 表示制御キー `clear` を廃止し、`CommandButtonKey` から削除。
 - 編集メニューの Tooltip 文言を「コピー / 貼り付け / 割り込み / クリア」に更新。
+
+## 29. 2026-04-25 追加更新 (portable .exe 配布対応)
+- `electron-builder` を `devDependencies` に追加（v26.x）。
+- `package.json` に `build` 設定を追加: `appId`、`productName`、`directories.output=release`、`win.target=portable`、`asarUnpack` で node-pty バイナリを展開、`npmRebuild=false`（プリビルドを利用するため node-gyp 不要）。
+- スクリプト `dist:win` (`npm run build && electron-builder --win --x64`) を追加し、`release/BcwTerminal-<version>-portable.exe` を出力。
+- `vite.config.mts` に `base: './'` を追加（Electron で `loadFile` する際にアセット相対パスを解決するため）。
+- `.gitignore` に `release/` を追加。
+- README.md に配布用ビルド手順と、winCodeSign キャッシュの symlink 問題（Developer Mode/管理者権限/手動展開）の回避策を記載。

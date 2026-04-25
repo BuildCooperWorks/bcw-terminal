@@ -61,7 +61,35 @@ npm run typecheck   # tsc --noEmit
 npm run build       # アイコン生成 + tsc + Vite ビルド + main プロセスの TypeScript ビルド
 ```
 
-ビルド成果物は `dist/` 配下に出力されます。配布用パッケージ化（electron-builder など）は未対応です。
+ビルド成果物は `dist/` 配下に出力されます。
+
+## 配布用ビルド (portable .exe)
+
+`electron-builder` で **インストール不要の portable .exe** を作成できます。
+
+```powershell
+npm run dist:win
+```
+
+成果物は `release/BcwTerminal-<version>-portable.exe`（約 96MB）。
+ダブルクリックで起動でき、ユーザーデータは `userData`（OS の `AppData/Roaming/BcwTerminal`）に保存されます。
+
+### 初回ビルド時の注意 (winCodeSign キャッシュ)
+
+electron-builder は内部で `winCodeSign-2.6.0.7z` をダウンロード・展開しますが、アーカイブ内の macOS 用 `.dylib` がシンボリックリンクで構成されているため、**Windows でシンボリックリンク作成権限がない環境（Developer Mode OFF かつ非管理者）ではエラーになります**。
+
+回避策のいずれかを選んでください:
+
+- **A. Windows の Developer Mode を有効化する**（推奨・一度だけ）
+  - 設定 → 「開発者向け」 → 「開発者モード」を ON
+- **B. 初回ビルドだけ管理者権限の PowerShell で `npm run dist:win` を実行**（キャッシュが作成された後は通常権限で OK）
+- **C. キャッシュを手動展開**（管理者権限不可・Dev Mode を有効化できない場合のみ）
+  ```powershell
+  $cache = "$env:LOCALAPPDATA\electron-builder\Cache\winCodeSign"
+  # 一度 npm run dist:win を実行し、$cache\<random>.7z をダウンロードさせる（失敗 OK）
+  & "node_modules\7zip-bin\win\x64\7za.exe" x "$cache\<random>.7z" "-o$cache\winCodeSign-2.6.0" "-xr!darwin" -y
+  # その後 npm run dist:win を再実行
+  ```
 
 ## ディレクトリ構成
 
