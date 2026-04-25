@@ -1,0 +1,43 @@
+{
+  "name": "bcw-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BcwTerminal - a local developer command dashboard for Windows.",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "npm run build:icon && concurrently -k \"vite --host 127.0.0.1\" \"npm:dev:electron\"",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && npm run build:main && node scripts/start-electron-dev.cjs",
+    "build": "npm run build:icon && tsc -b && vite build && npm run build:main",
+    "build:icon": "node scripts/build-icon.cjs",
+    "build:main": "tsc -p tsconfig.electron.json",
+    "rebuild:native": "electron-rebuild -f -w @homebridge/node-pty-prebuilt-multiarch",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@fontsource/inter": "^5.0.18",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "@mui/icons-material": "^5.15.18",
+    "@mui/material": "^5.15.18",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^41.3.0",
+    "png-to-ico": "^3.0.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "wait-on": "^7.2.0"
+  }
+}

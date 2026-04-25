@@ -1,0 +1,336 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+.terminal-page {
+  --bcw-ui-bg: #101216;
+  --bcw-ui-text: #edf1f5;
+  --bcw-terminal-bg: #0d1117;
+  --bcw-terminal-text: #e6edf3;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  min-width: 0;
+  color: var(--bcw-ui-text);
+  background: var(--bcw-ui-bg);
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bcw-ui-bg);
+}
+
+.terminal-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(119, 212, 196, 0.34);
+  border-radius: 8px;
+  color: #77d4c4;
+  background: rgba(119, 212, 196, 0.08);
+}
+
+.terminal-path-icon {
+  flex: 0 0 auto;
+  color: #f0b86b;
+}
+
+.terminal-path {
+  max-width: min(64vw, 760px);
+  color: var(--bcw-ui-text);
+}
+
+.terminal-status {
+  min-width: 96px;
+}
+
+.terminal-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 10px 14px 0;
+  background: var(--bcw-ui-bg);
+}
+
+.terminal-shortcut-button {
+  flex: 0 0 auto;
+  height: 30px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.terminal-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px;
+  background: var(--bcw-ui-bg);
+}
+
+.terminal-workspace.is-sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.terminal-shell {
+  min-height: 0;
+}
+
+.terminal-host {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: var(--bcw-terminal-bg);
+}
+
+.terminal-host .xterm {
+  height: 100%;
+  padding: 14px;
+}
+
+.terminal-host .xterm-viewport {
+  border-radius: 8px;
+}
+
+.terminal-sidebar {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bcw-ui-bg);
+}
+
+.terminal-sidebar-header {
+  min-height: 34px;
+  margin-bottom: 10px;
+}
+
+.terminal-sidebar-title {
+  color: var(--bcw-ui-text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.terminal-session-list {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.terminal-thumb {
+  display: grid;
+  width: 100%;
+  min-height: 158px;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--bcw-ui-text);
+  text-align: left;
+  background: var(--bcw-terminal-bg);
+  cursor: pointer;
+}
+
+.terminal-thumb:hover,
+.terminal-thumb:focus-visible {
+  border-color: rgba(119, 212, 196, 0.5);
+  outline: none;
+}
+
+.terminal-thumb.is-active {
+  border-color: #77d4c4;
+  box-shadow: inset 3px 0 0 #77d4c4;
+}
+
+.terminal-thumb-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.terminal-thumb-title {
+  overflow: hidden;
+  color: var(--bcw-ui-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-thumb-stop {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  color: #aab4c0;
+  font-size: 16px;
+}
+
+.terminal-thumb-stop:hover,
+.terminal-thumb-stop:focus-visible {
+  color: #ffb3ad;
+  background: rgba(255, 123, 114, 0.12);
+  outline: none;
+}
+
+.terminal-thumb-meta {
+  overflow: hidden;
+  color: var(--bcw-ui-text);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-thumb-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.terminal-thumb-activity,
+.terminal-thumb-intent {
+  overflow: hidden;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-thumb-activity.is-running {
+  color: #77d4c4;
+  border-color: rgba(119, 212, 196, 0.36);
+  background: rgba(119, 212, 196, 0.08);
+}
+
+.terminal-thumb-activity.is-idle {
+  color: #f0b86b;
+  border-color: rgba(240, 184, 107, 0.34);
+  background: rgba(240, 184, 107, 0.08);
+}
+
+.terminal-thumb-activity.is-stopped {
+  color: #ffb3ad;
+  border-color: rgba(255, 123, 114, 0.34);
+  background: rgba(255, 123, 114, 0.08);
+}
+
+.terminal-thumb-intent {
+  min-width: 0;
+  color: var(--bcw-ui-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.terminal-thumb-command,
+.terminal-thumb-url {
+  overflow: hidden;
+  color: #77d4c4;
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-thumb-url {
+  color: #79c0ff;
+}
+
+.terminal-thumb-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  min-height: 56px;
+  color: var(--bcw-terminal-text);
+  font-family: "Cascadia Mono", "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.terminal-settings-drawer-paper {
+  background-color: #101216 !important;
+  color: #edf1f5 !important;
+  background-image: none !important;
+}
+
+.terminal-settings-panel {
+  width: 340px;
+  max-width: 92vw;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 20px;
+  background: #101216;
+}
+
+.terminal-settings-title {
+  margin-bottom: 18px;
+  color: #edf1f5;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.terminal-settings-label {
+  margin-bottom: 6px;
+  color: #aab4c0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.terminal-settings-toggle-label {
+  color: #edf1f5;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.terminal-settings-description {
+  color: #8f99a6;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 980px) {
+  .terminal-workspace {
+    grid-template-columns: minmax(0, 1fr) 220px;
+  }
+
+  .terminal-sidebar {
+    padding-right: 0;
+  }
+}
