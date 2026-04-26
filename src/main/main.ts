@@ -11,6 +11,7 @@ import {
   shell,
 } from 'electron';
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -33,6 +34,11 @@ type WindowStateSnapshot = {
   height: number;
   alwaysOnTop: boolean;
   isMaximized: boolean;
+};
+
+type SmartAppControlState = {
+  status: 'on' | 'eval' | 'off' | 'unknown';
+  detail?: string;
 };
 
 let mainWindow: BrowserWindow | null = null;
@@ -297,6 +303,50 @@ function spawnShell(session: Omit<TerminalSession, 'shell'>) {
   return shell;
 }
 
+function getSmartAppControlState(): SmartAppControlState {
+  if (process.platform !== 'win32') {
+    return { status: 'unknown', detail: 'non-windows' };
+  }
+
+  try {
+    const output = execFileSync('reg', [
+      'query',
+      'HKLM\\SYSTEM\\CurrentControlSet\\Control\\CI\\Policy',
+      '/v',
+      'VerifiedAndReputablePolicyState',
+    ], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+
+    const line = output
+      .split(/\r?\n/)
+      .find((row) => row.includes('VerifiedAndReputablePolicyState'));
+
+    if (!line) {
+      return { status: 'unknown', detail: 'registry-value-not-found' };
+    }
+
+    const parts = line.trim().split(/\s+/);
+    const raw = parts.at(-1)?.toLowerCase() ?? '';
+    const value = raw.startsWith('0x') ? Number.parseInt(raw, 16) : Number.parseInt(raw, 10);
+
+    if (value === 2) {
+      return { status: 'on' };
+    }
+    if (value === 1) {
+      return { status: 'eval' };
+    }
+    if (value === 0) {
+      return { status: 'off' };
+    }
+
+    return { status: 'unknown', detail: `unexpected-value:${raw}` };
+  } catch (error) {
+    return { status: 'unknown', detail: (error as Error).message };
+  }
+}
+
 function createSession() {
   sessionCounter += 1;
 
@@ -369,6 +419,8 @@ ipcMain.handle('app:set-locale', (_event, locale: AppLocale) => {
   appLocale = locale === 'en' ? 'en' : 'ja';
   updateApplicationMenu(appLocale);
 });
+
+ipcMain.handle('system:get-smart-app-control-state', () => getSmartAppControlState());
 
 ipcMain.handle('window:get-state', () => {
   if (!mainWindow || mainWindow.isDestroyed()) {

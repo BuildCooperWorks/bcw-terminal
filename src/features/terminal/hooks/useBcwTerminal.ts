@@ -395,6 +395,48 @@ export function useBcwTerminal(settings: TerminalSettings) {
     [renderActiveBuffer],
   );
 
+  const closeSession = useCallback(
+    (sessionId: string) => {
+      const wasActive = activeIdRef.current === sessionId;
+      let nextActiveId: string | null = null;
+      let shouldCreateSession = false;
+
+      window.bcwTerminal.stop(sessionId);
+      window.clearTimeout(idleTimersRef.current.get(sessionId));
+      idleTimersRef.current.delete(sessionId);
+      buffersRef.current.delete(sessionId);
+      inputBuffersRef.current.delete(sessionId);
+
+      setSessions((current) => {
+        const remaining = current.filter((session) => session.id !== sessionId);
+
+        if (remaining.length === 0) {
+          shouldCreateSession = true;
+          return remaining;
+        }
+
+        if (wasActive) {
+          nextActiveId = remaining[0].id;
+        }
+
+        return remaining;
+      });
+
+      if (nextActiveId) {
+        selectSession(nextActiveId);
+      } else if (wasActive) {
+        activeIdRef.current = null;
+        setActiveSessionId(null);
+        terminalRef.current?.reset();
+      }
+
+      if (shouldCreateSession) {
+        void createSession();
+      }
+    },
+    [createSession, selectSession],
+  );
+
   const sendCommand = useCallback((command: string) => {
     const sessionId = activeIdRef.current;
     if (!sessionId) {
@@ -417,6 +459,24 @@ export function useBcwTerminal(settings: TerminalSettings) {
     window.bcwTerminal.sendData(sessionId, `${command}\r`);
   }, []);
 
+  const getSelectionText = useCallback(() => {
+    return terminalRef.current?.getSelection() ?? '';
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    terminalRef.current?.clearSelection();
+  }, []);
+
+  const focusTerminal = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    terminal.options.cursorBlink = true;
+    terminal.focus();
+  }, []);
+
   return {
     activeSession,
     activeSessionId,
@@ -426,7 +486,11 @@ export function useBcwTerminal(settings: TerminalSettings) {
     restartActiveSession,
     selectSession,
     sendCommand,
+    getSelectionText,
+    clearSelection,
+    focusTerminal,
     sessions,
+    closeSession,
     stopSession,
   };
 }

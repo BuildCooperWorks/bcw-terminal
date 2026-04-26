@@ -127,3 +127,9 @@ scripts/                    # ビルドヘルパー（アイコン生成 / Elect
 ## ライセンス
 
 未設定。
+
+## Windows 注意事項 (Smart App Control)
+
+- Windows 11 の **Smart App Control** が `ON` の場合、ローカル CLI や一部プロセス起動がブロックされ、ターミナル操作が失敗することがあります。
+- コマンド起動に失敗する場合は、Smart App Control を `OFF` に設定したうえで Windows を再起動してください。
+- BcwTerminal は起動時に Smart App Control 状態を検知し、`ON` / `評価モード` の場合は設定画面に警告メッセージを表示します。

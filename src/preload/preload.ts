@@ -3,6 +3,13 @@ import type { TerminalCwdEvent, TerminalExitEvent, TerminalOutputEvent } from '.
 
 const terminalApi = {
   createSession: () => ipcRenderer.invoke('terminal:create-session'),
+  getSmartAppControlState: async () => {
+    try {
+      return await ipcRenderer.invoke('system:get-smart-app-control-state');
+    } catch {
+      return { status: 'unknown' as const };
+    }
+  },
   getWindowState: async () => {
     try {
       return await ipcRenderer.invoke('window:get-state');

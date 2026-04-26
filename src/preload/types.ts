@@ -8,8 +8,14 @@ export type WindowStateSnapshot = {
   alwaysOnTop: boolean;
 };
 
+export type SmartAppControlState = {
+  status: 'on' | 'eval' | 'off' | 'unknown';
+  detail?: string;
+};
+
 export type TerminalApi = {
   createSession: () => Promise<TerminalSessionSnapshot>;
+  getSmartAppControlState: () => Promise<SmartAppControlState>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
   readClipboardText: () => Promise<string>;

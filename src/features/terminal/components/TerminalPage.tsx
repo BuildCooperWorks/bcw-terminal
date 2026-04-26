@@ -54,7 +54,7 @@ const DEFAULT_TERMINAL_BACKGROUND_COLOR = '#0d1117';
 const DEFAULT_TERMINAL_TEXT_COLOR = '#e6edf3';
 
 type AppLocale = 'ja' | 'en';
-type BuiltInMenuKey = 'claude' | 'chatgpt' | 'git' | 'ls' | 'network';
+type BuiltInMenuKey = 'claude' | 'chatgpt' | 'git' | 'ls' | 'dir' | 'network';
 type CommandButtonKey = BuiltInMenuKey | 'edit' | 'history';
 type CommandButtonVisibility = Record<CommandButtonKey, boolean>;
 
@@ -113,7 +113,12 @@ type PageSettings = TerminalSettings & {
   alwaysOnTop: boolean;
 };
 
-const BUILT_IN_MENU_ORDER: BuiltInMenuKey[] = ['claude', 'chatgpt', 'git', 'ls', 'network'];
+type SmartAppControlStatus = {
+  status: 'on' | 'eval' | 'off' | 'unknown';
+  detail?: string;
+};
+
+const BUILT_IN_MENU_ORDER: BuiltInMenuKey[] = ['claude', 'chatgpt', 'git', 'ls', 'dir', 'network'];
 
 const LOCALE_TEXT = {
   en: {
@@ -176,6 +181,10 @@ const LOCALE_TEXT = {
       'Reset all settings to defaults: language, fonts, terminal colors, sidebar options, button visibility, and command groups.',
     runAgain: 'Run',
     sendCtrlC: 'Send Ctrl+C',
+    smartAppControlEvalWarning:
+      'Smart App Control is in evaluation mode. Command launch can be restricted depending on policy.',
+    smartAppControlOnWarning:
+      'Smart App Control is ON. Local CLI launch can be blocked. Turn it OFF and reboot if commands fail.',
     sessions: 'Sessions',
     settings: 'Settings',
     openCommandManagerTooltip: 'Open command manager to edit command groups.',
@@ -253,6 +262,10 @@ const LOCALE_TEXT = {
       '表示言語・フォント・ターミナル色設定・サイドバー設定・ボタン表示・コマンド設定を初期値に戻します。',
     runAgain: '再実行',
     sendCtrlC: 'Ctrl+C を送信',
+    smartAppControlEvalWarning:
+      'Smart App Control が評価モードです。ポリシーにより一部コマンド起動が制限される場合があります。',
+    smartAppControlOnWarning:
+      'Smart App Control が ON のため、ローカルCLI起動がブロックされる場合があります。失敗する場合は OFF にして再起動してください。',
     sessions: 'セッション',
     settings: '設定',
     openCommandManagerTooltip: 'コマンド管理画面を開きます。',
@@ -276,7 +289,8 @@ const DEFAULT_COMMAND_BUTTON_VISIBILITY: CommandButtonVisibility = {
   claude: false,
   chatgpt: false,
   git: false,
-  ls: true,
+  ls: false,
+  dir: true,
   network: false,
   edit: true,
   history: true,
@@ -324,6 +338,17 @@ const DEFAULT_MENU_CONFIGS: CommandMenuConfigs = {
       { label: '隠し含む', command: 'ls -Force', description: '隠しファイルを含めて表示します。' },
       { label: '名前のみ', command: 'Get-ChildItem -Name', description: '名前だけを表示します。' },
       { label: '再帰', command: 'Get-ChildItem -Recurse', description: '配下を再帰的に表示します。' },
+    ],
+  },
+  dir: {
+    title: 'dir',
+    description: 'Windows 向け一覧表示コマンド。',
+    items: [
+      { label: '通常', command: 'dir', description: '現在ディレクトリを一覧表示します。' },
+      { label: '隠し含む', command: 'dir /a', description: '隠しファイルを含めて表示します。' },
+      { label: '詳細', command: 'dir /q', description: '所有者情報付きで表示します。' },
+      { label: '日付順', command: 'dir /o:-d', description: '更新日時の降順で表示します。' },
+      { label: '再帰', command: 'dir /s', description: '配下を再帰的に表示します。' },
     ],
   },
   network: {
@@ -514,6 +539,7 @@ function applyCommandConfigDocument(
     chatgpt: currentSettings.commandVisibility.chatgpt,
     git: currentSettings.commandVisibility.git,
     ls: currentSettings.commandVisibility.ls,
+    dir: currentSettings.commandVisibility.dir,
     network: currentSettings.commandVisibility.network,
   };
 
@@ -619,6 +645,7 @@ export function TerminalPage() {
   const [activeAiMenu, setActiveAiMenu] = useState<'claude' | 'chatgpt' | null>(null);
   const [gitMenuAnchor, setGitMenuAnchor] = useState<HTMLElement | null>(null);
   const [listMenuAnchor, setListMenuAnchor] = useState<HTMLElement | null>(null);
+  const [dirMenuAnchor, setDirMenuAnchor] = useState<HTMLElement | null>(null);
   const [networkMenuAnchor, setNetworkMenuAnchor] = useState<HTMLElement | null>(null);
   const [editMenuAnchor, setEditMenuAnchor] = useState<HTMLElement | null>(null);
   const [historyMenuAnchor, setHistoryMenuAnchor] = useState<HTMLElement | null>(null);
@@ -626,6 +653,7 @@ export function TerminalPage() {
   const [customMenuTargetId, setCustomMenuTargetId] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<PageSettings>(loadSettings);
+  const [smartAppControl, setSmartAppControl] = useState<SmartAppControlStatus>({ status: 'unknown' });
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>(loadHistory);
   const [commandConfigJson, setCommandConfigJson] = useState('');
   const [commandConfigMessage, setCommandConfigMessage] = useState('');
@@ -655,7 +683,21 @@ export function TerminalPage() {
     ],
   );
 
-  const { activeSession, activeSessionId, attachTerminal, createSession, fit, restartActiveSession, selectSession, sendCommand, sessions, stopSession } =
+  const {
+    activeSession,
+    activeSessionId,
+    attachTerminal,
+    closeSession,
+    createSession,
+    fit,
+    getSelectionText,
+    clearSelection,
+    focusTerminal,
+    restartActiveSession,
+    selectSession,
+    sendCommand,
+    sessions,
+  } =
     useBcwTerminal(terminalSettings);
 
   const text = LOCALE_TEXT[settings.locale];
@@ -707,6 +749,19 @@ export function TerminalPage() {
   }, [settings.locale]);
 
   useEffect(() => {
+    let active = true;
+    void window.bcwTerminal.getSmartAppControlState().then((state) => {
+      if (!active) {
+        return;
+      }
+      setSmartAppControl(state);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     void window.bcwTerminal
       .getWindowState()
       .then((snapshot) => {
@@ -752,13 +807,33 @@ export function TerminalPage() {
     }
   }, [sessions]);
 
+  const normalizeCommandForExecution = (command: string) => {
+    const trimmed = command.trim();
+    if (!trimmed) {
+      return trimmed;
+    }
+
+    if (/^cmd(\.exe)?\s+\/d?\s*\/c\s+dir(\s|$)/i.test(trimmed) || /^cmd(\.exe)?\s+\/c\s+dir(\s|$)/i.test(trimmed)) {
+      return trimmed;
+    }
+
+    if (/^dir(\s|$)/i.test(trimmed)) {
+      return `cmd /d /c ${trimmed}`;
+    }
+
+    return command;
+  };
+
   const runCommand = (command: string) => {
     if (!activeSessionId) {
       return;
     }
 
-    sendCommand(command);
+    sendCommand(normalizeCommandForExecution(command));
     appendCommandHistory(command, activeSessionId);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
   };
 
   const handleStopSession = (session: TerminalSessionView) => {
@@ -769,43 +844,65 @@ export function TerminalPage() {
       }
     }
 
-    stopSession(session.id);
+    closeSession(session.id);
   };
 
   const handleCopySelection = async () => {
-    const selectedText = window.getSelection()?.toString() ?? '';
+    const selectedText = getSelectionText() || window.getSelection()?.toString() || '';
     if (!selectedText.trim()) {
       setEditMenuAnchor(null);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
       return;
     }
     await window.bcwTerminal.writeClipboardText(selectedText);
+    clearSelection();
     setEditMenuAnchor(null);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
   };
 
   const handlePasteClipboard = async () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
       return;
     }
 
     const clipboardText = await window.bcwTerminal.readClipboardText();
     if (!clipboardText) {
       setEditMenuAnchor(null);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
       return;
     }
 
     window.bcwTerminal.sendData(activeSessionId, clipboardText);
     setEditMenuAnchor(null);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
   };
 
   const handleSendCtrlC = () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
       return;
     }
 
     window.bcwTerminal.sendData(activeSessionId, '\x03');
     setEditMenuAnchor(null);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
   };
 
   const updateBuiltInMenu = (key: BuiltInMenuKey, updater: (current: CommandMenuConfig) => CommandMenuConfig) => {
@@ -1142,6 +1239,26 @@ export function TerminalPage() {
             );
           }
 
+          if (groupId === 'dir') {
+            return (
+              <Tooltip key={groupId} title={settings.menuConfigs.dir.description}>
+                <span>
+                  <Button
+                    className="terminal-shortcut-button"
+                    disabled={!activeSession || activeSession.status === 'stopped'}
+                    endIcon={<ArrowDropDownIcon />}
+                    size="small"
+                    startIcon={<FormatListBulletedIcon />}
+                    variant="outlined"
+                    onClick={(event) => setDirMenuAnchor(event.currentTarget)}
+                  >
+                    {settings.menuConfigs.dir.title}
+                  </Button>
+                </span>
+              </Tooltip>
+            );
+          }
+
           if (groupId === 'network') {
             return (
               <Tooltip key={groupId} title={settings.menuConfigs.network.description}>
@@ -1248,6 +1365,23 @@ export function TerminalPage() {
           ))}
         </Menu>
 
+        <Menu anchorEl={dirMenuAnchor} open={Boolean(dirMenuAnchor)} onClose={() => setDirMenuAnchor(null)}>
+          {settings.menuConfigs.dir.items.map((item, index) => (
+            <MenuItem
+              key={`${item.command}-${index}`}
+              onClick={() => {
+                runCommand(item.command);
+                setDirMenuAnchor(null);
+              }}
+            >
+              <ListItemIcon>
+                <PlayArrowIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
+            </MenuItem>
+          ))}
+        </Menu>
+
         <Menu anchorEl={networkMenuAnchor} open={Boolean(networkMenuAnchor)} onClose={() => setNetworkMenuAnchor(null)}>
           {settings.menuConfigs.network.items.map((item, index) => (
             <MenuItem
@@ -1308,7 +1442,7 @@ export function TerminalPage() {
               </span>
             </Tooltip>
             <Menu anchorEl={editMenuAnchor} open={Boolean(editMenuAnchor)} onClose={() => setEditMenuAnchor(null)}>
-              <MenuItem onClick={() => void handleCopySelection()}>
+              <MenuItem onMouseDown={(event) => event.preventDefault()} onClick={() => void handleCopySelection()}>
                 <ListItemIcon>
                   <ContentCopyIcon fontSize="small" />
                 </ListItemIcon>
@@ -1328,6 +1462,7 @@ export function TerminalPage() {
               </MenuItem>
               <Divider />
               <MenuItem
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   runCommand('cls');
                   setEditMenuAnchor(null);
@@ -1474,6 +1609,13 @@ export function TerminalPage() {
           <Typography className="terminal-settings-title">{text.settings}</Typography>
 
           <Stack spacing={2.5}>
+            {smartAppControl.status === 'on' ? (
+              <Typography className="terminal-settings-warning">{text.smartAppControlOnWarning}</Typography>
+            ) : null}
+            {smartAppControl.status === 'eval' ? (
+              <Typography className="terminal-settings-warning">{text.smartAppControlEvalWarning}</Typography>
+            ) : null}
+
             <Box>
               <Typography className="terminal-settings-label">{text.language}</Typography>
               <TextField
