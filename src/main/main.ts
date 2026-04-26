@@ -101,6 +101,18 @@ const MENU_TEXT = {
   },
 } as const;
 
+function getDefaultStartupCwd() {
+  if (process.platform === 'win32') {
+    const systemDrive = process.env.SystemDrive || 'C:';
+    const normalized = systemDrive.endsWith('\\') ? systemDrive : `${systemDrive}\\`;
+    if (fs.existsSync(normalized)) {
+      return normalized;
+    }
+  }
+
+  return process.cwd();
+}
+
 function getAppIconPath() {
   if (process.env.VITE_DEV_SERVER_URL) {
     return path.join(process.cwd(), 'public/app-icon.ico');
@@ -349,11 +361,12 @@ function getSmartAppControlState(): SmartAppControlState {
 
 function createSession() {
   sessionCounter += 1;
+  const defaultCwd = getDefaultStartupCwd();
 
   const sessionBase = {
     id: `terminal-${sessionCounter}`,
     title: `PowerShell ${sessionCounter}`,
-    cwd: process.cwd(),
+    cwd: defaultCwd,
   };
   const shell = spawnShell(sessionBase);
   const session = { ...sessionBase, shell };
