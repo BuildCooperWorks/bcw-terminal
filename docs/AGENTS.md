@@ -302,3 +302,9 @@ src/
 - `vite.config.mts` に `base: './'` を追加（Electron で `loadFile` する際にアセット相対パスを解決するため）。
 - `.gitignore` に `release/` を追加。
 - README.md に配布用ビルド手順と、winCodeSign キャッシュの symlink 問題（Developer Mode/管理者権限/手動展開）の回避策を記載。
+## 30. 2026-04-26 Update Notes (ASCII)
+- Added Windows `dir` shortcut safety behavior: `dir ...` is executed via `cmd /d /c dir ...`.
+- Improved post-shortcut focus behavior so users can continue typing immediately.
+- Fixed copy behavior: copied selection is cleared after successful clipboard write.
+- Adjusted focus/selection interaction so mouse drag selection remains available.
+- Added `scripts/patch-node-pty-spectre.cjs` and `postinstall` wiring for native rebuild stability.

@@ -1,5 +1,9 @@
 # BcwTerminal
 
+## Latest Docs
+
+- [Recent Updates (2026-04-26)](docs/recent-updates-2026-04-26.md)
+
 Windows 上で動く、自分専用の開発ターミナルダッシュボード。
 Windows Terminal を完全に置き換えるのではなく、よく使う開発コマンドをワンクリックで叩けるよう拡張した PowerShell ラッパーです。
 
