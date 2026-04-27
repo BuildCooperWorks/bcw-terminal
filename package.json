@@ -31,6 +31,10 @@
       "package.json",
       "!**/*.map"
     ],
+    "electronLanguages": [
+      "ja",
+      "en-US"
+    ],
     "asarUnpack": [
       "node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*"
     ],
