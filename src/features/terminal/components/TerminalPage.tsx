@@ -17,7 +17,6 @@ import GitHubIcon from '@mui/icons-material/GitHub';
 import HistoryIcon from '@mui/icons-material/History';
 import LanIcon from '@mui/icons-material/Lan';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -391,7 +390,7 @@ const DEFAULT_MENU_CONFIGS: CommandMenuConfigs = {
     ],
   },
   dir: {
-    title: 'dir',
+    title: 'ディレクトリ',
     description: 'Windows 向け一覧表示 / ディレクトリ操作コマンド。',
     items: [
       { label: '通常', command: 'dir', description: '現在ディレクトリを一覧表示します。' },
@@ -546,7 +545,10 @@ function loadSettings(): PageSettings {
       const normalizedItems = key === 'dir' ? dedupeMenuItems(migrateLegacyDirItems(mergedItems)) : dedupeMenuItems(mergedItems);
 
       menuConfigs[key] = {
-        title: savedConfig.title ?? defaults.menuConfigs[key].title,
+        title:
+          key === 'dir' && (savedConfig.title === 'dir' || !savedConfig.title)
+            ? defaults.menuConfigs[key].title
+            : (savedConfig.title ?? defaults.menuConfigs[key].title),
         description: savedConfig.description ?? defaults.menuConfigs[key].description,
         items: normalizedItems,
       };
@@ -841,7 +843,6 @@ export function TerminalPage() {
     getSelectionText,
     clearSelection,
     focusTerminal,
-    restartActiveSession,
     selectSession,
     sendCommand,
     sessions,
@@ -1348,18 +1349,6 @@ export function TerminalPage() {
             <IconButton aria-label="New PowerShell session" color="primary" onClick={createSession}>
               <AddIcon />
             </IconButton>
-          </Tooltip>
-          <Tooltip title="選択中の PowerShell を再起動">
-            <span>
-              <IconButton
-                aria-label="Restart selected PowerShell"
-                color="primary"
-                disabled={!activeSession}
-                onClick={restartActiveSession}
-              >
-                <RefreshIcon />
-              </IconButton>
-            </span>
           </Tooltip>
           <Tooltip
             title={

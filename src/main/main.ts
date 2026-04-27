@@ -77,47 +77,29 @@ let appUpdateState: AppUpdateState = {
 const MENU_TEXT = {
   en: {
     close: 'Close',
-    copy: 'Copy',
-    cut: 'Cut',
     docs: 'Project Page',
-    edit: 'Edit',
     file: 'File',
     forceReload: 'Force Reload',
     help: 'Help',
-    minimize: 'Minimize',
-    paste: 'Paste',
-    redo: 'Redo',
     reload: 'Reload',
     resetZoom: 'Reset Zoom',
-    selectAll: 'Select All',
     toggleDevTools: 'Toggle Developer Tools',
     toggleFullScreen: 'Toggle Full Screen',
-    undo: 'Undo',
     view: 'View',
-    window: 'Window',
     zoomIn: 'Zoom In',
     zoomOut: 'Zoom Out',
   },
   ja: {
     close: '閉じる',
-    copy: 'コピー',
-    cut: '切り取り',
     docs: 'プロジェクトページを開く',
-    edit: '編集',
     file: 'ファイル',
     forceReload: '強制再読み込み',
     help: 'ヘルプ',
-    minimize: '最小化',
-    paste: '貼り付け',
-    redo: 'やり直し',
     reload: '再読み込み',
     resetZoom: 'ズームをリセット',
-    selectAll: 'すべて選択',
     toggleDevTools: '開発者ツール',
     toggleFullScreen: '全画面表示',
-    undo: '元に戻す',
     view: '表示',
-    window: 'ウィンドウ',
     zoomIn: '拡大',
     zoomOut: '縮小',
   },
@@ -340,19 +322,6 @@ function updateApplicationMenu(locale: AppLocale) {
       submenu: [{ label: text.close, role: 'close' }],
     },
     {
-      label: text.edit,
-      submenu: [
-        { label: text.undo, role: 'undo' },
-        { label: text.redo, role: 'redo' },
-        { type: 'separator' },
-        { label: text.cut, role: 'cut' },
-        { label: text.copy, role: 'copy' },
-        { label: text.paste, role: 'paste' },
-        { type: 'separator' },
-        { label: text.selectAll, role: 'selectAll' },
-      ],
-    },
-    {
       label: text.view,
       submenu: [
         { label: text.reload, role: 'reload' },
@@ -362,13 +331,7 @@ function updateApplicationMenu(locale: AppLocale) {
         { label: text.resetZoom, role: 'resetZoom' },
         { label: text.zoomIn, role: 'zoomIn' },
         { label: text.zoomOut, role: 'zoomOut' },
-        { type: 'separator' },
-        { label: text.toggleFullScreen, role: 'togglefullscreen' },
       ],
-    },
-    {
-      label: text.window,
-      submenu: [{ label: text.minimize, role: 'minimize' }, { label: text.close, role: 'close' }],
     },
     {
       label: text.help,
@@ -488,33 +451,7 @@ function createSession() {
   };
 }
 
-function restartSession(sessionId: string) {
-  const session = sessions.get(sessionId);
-  if (!session) {
-    return null;
-  }
-
-  session.shell?.kill();
-
-  const restartedBase = {
-    id: session.id,
-    title: session.title,
-    cwd: session.cwd || process.cwd(),
-  };
-  const shell = spawnShell(restartedBase);
-  const restarted: TerminalSession = { ...restartedBase, shell };
-
-  sessions.set(sessionId, restarted);
-
-  return {
-    id: restarted.id,
-    title: restarted.title,
-    cwd: restarted.cwd,
-  };
-}
-
 ipcMain.handle('terminal:create-session', () => createSession());
-ipcMain.handle('terminal:restart-session', (_event, sessionId: string) => restartSession(sessionId));
 
 ipcMain.on('terminal:data', (_event, payload: { sessionId: string; data: string }) => {
   sessions.get(payload.sessionId)?.shell?.write(payload.data);

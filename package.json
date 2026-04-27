@@ -14,7 +14,7 @@
     "rebuild:native": "electron-rebuild -f -w @homebridge/node-pty-prebuilt-multiarch",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "dist:win": "npm run build && electron-builder --win --x64"
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never"
   },
   "build": {
     "appId": "com.buildcooperworks.bcwterminal",
@@ -62,19 +62,19 @@
     "@emotion/styled": "^11.11.5",
     "@fontsource/inter": "^5.0.18",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
-    "@mui/icons-material": "^5.15.18",
-    "@mui/material": "^5.15.18",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
+    "@mui/icons-material": "^7.3.10",
+    "@mui/material": "^7.3.10",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron-updater": "^6.6.2",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
     "@types/node": "^20.12.12",
-    "@types/react": "^18.2.66",
-    "@types/react-dom": "^18.2.22",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",

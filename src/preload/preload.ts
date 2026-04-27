@@ -27,7 +27,6 @@ const terminalApi = {
   },
   loadCommandConfigFile: () => ipcRenderer.invoke('command-config:load-file'),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
-  restartSession: (sessionId: string) => ipcRenderer.invoke('terminal:restart-session', sessionId),
   saveCommandConfigFile: (content: string, currentPath?: string) =>
     ipcRenderer.invoke('command-config:save-file', { content, currentPath }),
   setAlwaysOnTop: async (value: boolean) => {

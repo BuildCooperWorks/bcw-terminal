@@ -37,7 +37,6 @@ export type TerminalApi = {
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
   readClipboardText: () => Promise<string>;
-  restartSession: (sessionId: string) => Promise<TerminalSessionSnapshot | null>;
   saveCommandConfigFile: (content: string, currentPath?: string) => Promise<CommandConfigFileResult>;
   setAlwaysOnTop: (value: boolean) => Promise<void>;
   setLocale: (locale: AppLocale) => Promise<void>;

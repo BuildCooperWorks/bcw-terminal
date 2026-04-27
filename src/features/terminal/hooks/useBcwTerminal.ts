@@ -145,11 +145,15 @@ export function useBcwTerminal(settings: TerminalSettings) {
   );
 
   const fit = useCallback(() => {
-    fitAddonRef.current?.fit();
+    try {
+      fitAddonRef.current?.fit();
+    } catch {
+      return;
+    }
 
     const terminal = terminalRef.current;
     const sessionId = activeIdRef.current;
-    if (terminal && sessionId) {
+    if (terminal && sessionId && terminal.cols > 0 && terminal.rows > 0) {
       window.bcwTerminal.resize(sessionId, terminal.cols, terminal.rows);
     }
   }, []);
@@ -160,9 +164,13 @@ export function useBcwTerminal(settings: TerminalSettings) {
       return;
     }
 
-    terminal.reset();
-    terminal.write(buffersRef.current.get(sessionId) ?? '');
-    terminal.focus();
+    try {
+      terminal.reset();
+      terminal.write(buffersRef.current.get(sessionId) ?? '');
+      terminal.focus();
+    } catch {
+      // Ignore transient renderer timing issues while xterm initializes or disposes.
+    }
   }, []);
 
   const selectSession = useCallback(
@@ -277,7 +285,11 @@ export function useBcwTerminal(settings: TerminalSettings) {
       const url = inferUrl(cleanedOutput);
 
       if (activeIdRef.current === sessionId) {
-        terminalRef.current?.write(output);
+        try {
+          terminalRef.current?.write(output);
+        } catch {
+          // Ignore transient renderer timing issues while xterm initializes or disposes.
+        }
       }
 
       window.clearTimeout(idleTimersRef.current.get(sessionId));
@@ -318,7 +330,11 @@ export function useBcwTerminal(settings: TerminalSettings) {
       );
 
       if (activeIdRef.current === sessionId) {
-        terminalRef.current?.write('\r\nPowerShell session stopped.\r\n');
+        try {
+          terminalRef.current?.write('\r\nPowerShell session stopped.\r\n');
+        } catch {
+          // Ignore transient renderer timing issues while xterm initializes or disposes.
+        }
       }
     });
 
@@ -338,46 +354,6 @@ export function useBcwTerminal(settings: TerminalSettings) {
       fitAddonRef.current = null;
     };
   }, [fit]);
-
-  const restartActiveSession = useCallback(async () => {
-    const sessionId = activeIdRef.current;
-    if (!sessionId) {
-      return;
-    }
-
-    setSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId
-          ? { ...session, status: 'starting', activity: 'running', intent: 'PowerShell', lastCommand: '', url: undefined }
-          : session,
-      ),
-    );
-    buffersRef.current.set(sessionId, 'BcwTerminal PowerShell session\r\n');
-    renderActiveBuffer(sessionId);
-
-    const restarted = await window.bcwTerminal.restartSession(sessionId);
-    if (!restarted) {
-      setSessions((current) =>
-        current.map((session) => (session.id === sessionId ? { ...session, status: 'stopped' } : session)),
-      );
-      return;
-    }
-
-    setSessions((current) =>
-      current.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              cwd: restarted.cwd,
-              status: 'ready',
-              activity: 'running',
-              intent: 'PowerShell',
-              preview: 'PowerShell を起動中',
-            }
-          : session,
-      ),
-    );
-  }, [renderActiveBuffer]);
 
   const stopSession = useCallback(
     (sessionId: string) => {
@@ -483,7 +459,6 @@ export function useBcwTerminal(settings: TerminalSettings) {
     attachTerminal,
     createSession,
     fit,
-    restartActiveSession,
     selectSession,
     sendCommand,
     getSelectionText,
