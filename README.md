@@ -14,7 +14,7 @@ Windows Terminal を完全に置き換えるのではなく、よく使う開発
 ## 主な機能
 
 - **PowerShell セッション管理**: 中央のメインターミナル + 右サイドのサムネイルで複数セッションを切替
-- **コマンドショートカット**: Claude / ChatGPT / Git / ls / Network などをドロップダウン化
+- **コマンドショートカット**: Claude / ChatGPT / Git / ls / dir（`cd` / `mkdir` 含む） / Network などをドロップダウン化
 - **コマンド管理ダイアログ**:
   - フォーム編集モード: グループ単位でタイトル・項目（ラベル / コマンド / 説明）を編集
   - JSON 編集モード: `groups` / `groupOrder` を直接編集 / ファイル保存・読み込み
@@ -94,6 +94,33 @@ electron-builder は内部で `winCodeSign-2.6.0.7z` をダウンロード・展
   & "node_modules\7zip-bin\win\x64\7za.exe" x "$cache\<random>.7z" "-o$cache\winCodeSign-2.6.0" "-xr!darwin" -y
   # その後 npm run dist:win を再実行
   ```
+
+## 配布方法のおすすめ (Google Drive 以外)
+
+Google Drive 配布でも動きますが、ダウンロード時に Mark-of-the-Web が付きやすく、解凍後実行がブロックされやすいです。実運用では次を推奨します。
+
+1. GitHub Releases + `portable.exe` 配布（最小構成）
+2. GitHub Releases + 署名付きインストーラー（NSIS/MSI）
+3. `winget` / `Scoop` / `Chocolatey` で配布（企業内展開向け）
+
+最初の一歩としては、`npm run dist:win` で作った `release/BcwTerminal-<version>-portable.exe` を GitHub Releases に上げる運用が最も現実的です。さらにブロック率を下げるなら、次段でコード署名証明書を導入してください。
+
+どうしても Google Drive を使う場合は、利用者向け手順として次を案内してください。
+
+```powershell
+Unblock-File -Path .\BcwTerminal-<version>-portable.exe
+```
+
+### GitHub Releases 自動公開 (最小構成)
+
+このリポジトリには、`v*` タグ push 時に Windows portable をビルドして GitHub Releases へ自動公開する workflow を追加済みです。
+
+```powershell
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+成功すると `release/*-portable.exe` が `v0.1.1` の Release に添付されます。
 
 ## ディレクトリ構成
 

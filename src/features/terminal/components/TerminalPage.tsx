@@ -164,6 +164,9 @@ const LOCALE_TEXT = {
     jsonSaveTooltip: 'Save current command group configuration to a JSON file.',
     language: 'Language',
     lineHeight: 'Line height',
+    mkdirDialogTitle: 'Create folder',
+    mkdirDialogDescription: 'Enter a folder name.',
+    mkdirDialogLabel: 'Folder name',
     manageItems: 'Items',
     menuTitle: 'Button title',
     menuVisible: 'Show this group',
@@ -176,6 +179,8 @@ const LOCALE_TEXT = {
     noHistory: 'No command history yet.',
     pasteClipboard: 'Paste clipboard',
     powerShellStarting: 'Starting PowerShell',
+    cancel: 'Cancel',
+    create: 'Create',
     resetSettings: 'Reset settings',
     resetSettingsTooltip:
       'Reset all settings to defaults: language, fonts, terminal colors, sidebar options, button visibility, and command groups.',
@@ -245,6 +250,9 @@ const LOCALE_TEXT = {
     jsonSaveTooltip: '現在のコマンド設定をJSONファイルへ保存します。',
     language: '表示言語',
     lineHeight: '行間',
+    mkdirDialogTitle: 'フォルダーを作成',
+    mkdirDialogDescription: '作成するフォルダー名を入力してください。',
+    mkdirDialogLabel: 'フォルダー名',
     manageItems: '項目一覧',
     menuTitle: 'ボタン名',
     menuVisible: 'このグループを表示',
@@ -257,6 +265,8 @@ const LOCALE_TEXT = {
     noHistory: '履歴はまだありません。',
     pasteClipboard: 'クリップボードを貼り付け',
     powerShellStarting: 'PowerShell を起動中',
+    cancel: 'キャンセル',
+    create: '作成',
     resetSettings: '設定をリセット',
     resetSettingsTooltip:
       '表示言語・フォント・ターミナル色設定・サイドバー設定・ボタン表示・コマンド設定を初期値に戻します。',
@@ -342,13 +352,16 @@ const DEFAULT_MENU_CONFIGS: CommandMenuConfigs = {
   },
   dir: {
     title: 'dir',
-    description: 'Windows 向け一覧表示コマンド。',
+    description: 'Windows 向け一覧表示 / ディレクトリ操作コマンド。',
     items: [
       { label: '通常', command: 'dir', description: '現在ディレクトリを一覧表示します。' },
       { label: '隠し含む', command: 'dir /a', description: '隠しファイルを含めて表示します。' },
       { label: '詳細', command: 'dir /q', description: '所有者情報付きで表示します。' },
       { label: '日付順', command: 'dir /o:-d', description: '更新日時の降順で表示します。' },
-      { label: '再帰', command: 'dir /s', description: '配下を再帰的に表示します。' },
+      { label: '現在位置', command: 'Get-Location', description: '現在の作業ディレクトリを表示します。' },
+      { label: '1階層上へ', command: 'cd ..', description: '親ディレクトリへ移動します。' },
+      { label: 'ホームへ', command: 'cd ~', description: 'ホームディレクトリへ移動します。' },
+      { label: '新規作成', command: 'mkdir ', description: 'クリック後の入力ダイアログで任意のフォルダー名を指定して作成します。' },
     ],
   },
   network: {
@@ -411,6 +424,67 @@ function normalizeColor(value: unknown, fallback: string) {
   return fallback;
 }
 
+function mergeMenuItemsWithDefaults(savedItems: unknown, defaultItems: CommandMenuItem[]) {
+  if (!Array.isArray(savedItems)) {
+    return [...defaultItems];
+  }
+
+  const validSavedItems = savedItems.filter(
+    (item): item is CommandMenuItem =>
+      Boolean(item) &&
+      typeof (item as CommandMenuItem).label === 'string' &&
+      typeof (item as CommandMenuItem).command === 'string' &&
+      typeof (item as CommandMenuItem).description === 'string',
+  );
+
+  const existingCommands = new Set(validSavedItems.map((item) => item.command.trim().toLowerCase()));
+  const missingDefaultItems = defaultItems.filter((item) => !existingCommands.has(item.command.trim().toLowerCase()));
+
+  return [...validSavedItems, ...missingDefaultItems];
+}
+
+function migrateLegacyDirItems(items: CommandMenuItem[]) {
+  return items
+    .filter((item) => {
+      const normalizedCommand = item.command.trim().toLowerCase();
+      if (normalizedCommand === 'dir /s') {
+        return false;
+      }
+      if (normalizedCommand === 'mkdir .\\work\\scratch -force') {
+        return false;
+      }
+      return true;
+    })
+    .map((item) => {
+      const normalizedCommand = item.command.trim().toLowerCase();
+      if (normalizedCommand !== 'mkdir new-folder' && normalizedCommand !== 'mkdir') {
+        return item;
+      }
+
+      return {
+        label: '新規作成',
+        command: 'mkdir ',
+        description: 'クリック後の入力ダイアログで任意のフォルダー名を指定して作成します。',
+      };
+    });
+}
+
+function dedupeMenuItems(items: CommandMenuItem[]) {
+  const seen = new Set<string>();
+  const deduped: CommandMenuItem[] = [];
+
+  for (const item of items) {
+    const key = `${item.label.trim().toLowerCase()}::${item.command.trim().toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
+}
+
 function loadSettings(): PageSettings {
   try {
     const saved = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -428,10 +502,13 @@ function loadSettings(): PageSettings {
         continue;
       }
 
+      const mergedItems = mergeMenuItemsWithDefaults(savedConfig.items, defaults.menuConfigs[key].items);
+      const normalizedItems = key === 'dir' ? dedupeMenuItems(migrateLegacyDirItems(mergedItems)) : dedupeMenuItems(mergedItems);
+
       menuConfigs[key] = {
         title: savedConfig.title ?? defaults.menuConfigs[key].title,
         description: savedConfig.description ?? defaults.menuConfigs[key].description,
-        items: Array.isArray(savedConfig.items) ? savedConfig.items : defaults.menuConfigs[key].items,
+        items: normalizedItems,
       };
     }
 
@@ -636,6 +713,7 @@ function makeGroupId() {
 
 export function TerminalPage() {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const mkdirInputRef = useRef<HTMLInputElement | null>(null);
   const previousSessionCommandsRef = useRef<Record<string, string>>({});
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -658,6 +736,8 @@ export function TerminalPage() {
   const [commandConfigJson, setCommandConfigJson] = useState('');
   const [commandConfigMessage, setCommandConfigMessage] = useState('');
   const [commandManagerMode, setCommandManagerMode] = useState<'form' | 'json'>('form');
+  const [mkdirDialogOpen, setMkdirDialogOpen] = useState(false);
+  const [mkdirFolderName, setMkdirFolderName] = useState('');
 
   const [managerTargetKey, setManagerTargetKey] = useState<string>('claude');
   const [newItemLabel, setNewItemLabel] = useState('');
@@ -772,6 +852,19 @@ export function TerminalPage() {
       });
   }, []);
 
+  useEffect(() => {
+    if (!mkdirDialogOpen) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      mkdirInputRef.current?.focus();
+      mkdirInputRef.current?.select();
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, [mkdirDialogOpen]);
+
   const appendCommandHistory = (command: string, sessionId: string) => {
     const normalized = command.trim();
     if (!normalized) {
@@ -824,13 +917,50 @@ export function TerminalPage() {
     return command;
   };
 
+  const resolveCommandForExecution = (command: string) => {
+    if (/^mkdir(?:\s+new-folder)?\s*$/i.test(command)) {
+      setMkdirFolderName('');
+      setMkdirDialogOpen(true);
+      return null;
+    }
+
+    return normalizeCommandForExecution(command);
+  };
+
   const runCommand = (command: string) => {
     if (!activeSessionId) {
       return;
     }
 
-    sendCommand(normalizeCommandForExecution(command));
-    appendCommandHistory(command, activeSessionId);
+    const resolvedCommand = resolveCommandForExecution(command);
+    if (!resolvedCommand) {
+      return;
+    }
+
+    sendCommand(resolvedCommand);
+    appendCommandHistory(resolvedCommand, activeSessionId);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
+  };
+
+  const handleMkdirFromDialog = () => {
+    if (!activeSessionId) {
+      setMkdirDialogOpen(false);
+      return;
+    }
+
+    const normalized = mkdirFolderName.trim();
+    if (!normalized) {
+      return;
+    }
+
+    const escaped = normalized.replace(/"/g, '`"');
+    const resolvedCommand = `mkdir "${escaped}"`;
+    sendCommand(resolvedCommand);
+    appendCommandHistory(resolvedCommand, activeSessionId);
+    setMkdirDialogOpen(false);
+    setMkdirFolderName('');
     window.requestAnimationFrame(() => {
       focusTerminal();
     });
@@ -1765,6 +1895,36 @@ export function TerminalPage() {
           </Stack>
         </Box>
       </Drawer>
+
+      <Dialog open={mkdirDialogOpen} onClose={() => setMkdirDialogOpen(false)}>
+        <DialogTitle>{text.mkdirDialogTitle}</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.25} sx={{ minWidth: { xs: 280, sm: 360 } }}>
+            <Typography className="terminal-settings-description">{text.mkdirDialogDescription}</Typography>
+            <TextField
+              autoFocus
+              fullWidth
+              label={text.mkdirDialogLabel}
+              size="small"
+              inputRef={mkdirInputRef}
+              value={mkdirFolderName}
+              onChange={(event) => setMkdirFolderName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  handleMkdirFromDialog();
+                }
+              }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMkdirDialogOpen(false)}>{text.cancel}</Button>
+          <Button variant="contained" onClick={handleMkdirFromDialog} disabled={!mkdirFolderName.trim()}>
+            {text.create}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog fullWidth maxWidth="md" open={commandManagerOpen} onClose={() => setCommandManagerOpen(false)}>
         <DialogTitle>{text.commandManager}</DialogTitle>
