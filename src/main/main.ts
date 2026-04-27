@@ -376,7 +376,7 @@ function updateApplicationMenu(locale: AppLocale) {
         {
           label: text.docs,
           click: () => {
-            void shell.openExternal('https://github.com/BuildCooperWorks');
+            void shell.openExternal('https://github.com/BuildCooperWorks/bcw-terminal');
           },
         },
       ],
