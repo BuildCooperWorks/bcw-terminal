@@ -26,6 +26,16 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Sync package version from tag
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        run: |
+          $version = "${env:GITHUB_REF_NAME}" -replace '^v', ''
+          if (-not $version) {
+            throw "Failed to parse version from tag: ${env:GITHUB_REF_NAME}"
+          }
+          npm version $version --no-git-tag-version
+
       - name: Install dependencies
         run: npm ci
 
