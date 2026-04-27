@@ -337,6 +337,11 @@ function updateApplicationMenu(locale: AppLocale) {
       label: text.help,
       submenu: [
         {
+          label: locale === 'ja' ? `バージョン ${app.getVersion()}` : `Version ${app.getVersion()}`,
+          enabled: false,
+        },
+        { type: 'separator' },
+        {
           label: text.docs,
           click: () => {
             void shell.openExternal('https://github.com/BuildCooperWorks/bcw-terminal');
