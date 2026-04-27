@@ -13,8 +13,26 @@ export type SmartAppControlState = {
   detail?: string;
 };
 
+export type AppUpdateState = {
+  error?: string;
+  progress?: number;
+  supported: boolean;
+  updateVersion?: string;
+  status:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'downloaded'
+    | 'up-to-date'
+    | 'error'
+    | 'unsupported';
+};
+
 export type TerminalApi = {
+  checkForAppUpdate: () => Promise<{ started: boolean; supported: boolean }>;
   createSession: () => Promise<TerminalSessionSnapshot>;
+  getAppUpdateState: () => Promise<AppUpdateState>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
@@ -27,6 +45,8 @@ export type TerminalApi = {
   resize: (sessionId: string, cols: number, rows: number) => void;
   stop: (sessionId: string) => void;
   writeClipboardText: (text: string) => Promise<void>;
+  installDownloadedAppUpdate: () => Promise<{ started: boolean }>;
+  onAppUpdateStatus: (callback: (event: AppUpdateState) => void) => () => void;
   onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
   onCwdChange: (callback: (event: TerminalCwdEvent) => void) => () => void;
   onExit: (callback: (event: TerminalExitEvent) => void) => () => void;

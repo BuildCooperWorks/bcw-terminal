@@ -67,16 +67,19 @@ npm run build       # アイコン生成 + tsc + Vite ビルド + main プロセ
 
 ビルド成果物は `dist/` 配下に出力されます。
 
-## 配布用ビルド (portable .exe)
+## 配布用ビルド (Windows)
 
-`electron-builder` で **インストール不要の portable .exe** を作成できます。
+`electron-builder` で `portable.exe` と `setup.exe (NSIS)` を作成できます。
 
 ```powershell
 npm run dist:win
 ```
 
-成果物は `release/BcwTerminal-<version>-portable.exe`（約 96MB）。
-ダブルクリックで起動でき、ユーザーデータは `userData`（OS の `AppData/Roaming/BcwTerminal`）に保存されます。
+成果物例:
+- `release/BcwTerminal-<version>.exe` (portable)
+- `release/BcwTerminal-setup-<version>.exe` (NSIS installer)
+
+自動更新を使う場合は NSIS 版を推奨します。
 
 ### 初回ビルド時の注意 (winCodeSign キャッシュ)
 
@@ -99,28 +102,34 @@ electron-builder は内部で `winCodeSign-2.6.0.7z` をダウンロード・展
 
 Google Drive 配布でも動きますが、ダウンロード時に Mark-of-the-Web が付きやすく、解凍後実行がブロックされやすいです。実運用では次を推奨します。
 
-1. GitHub Releases + `portable.exe` 配布（最小構成）
+1. GitHub Releases + `portable.exe` / `setup.exe` 配布（最小構成）
 2. GitHub Releases + 署名付きインストーラー（NSIS/MSI）
 3. `winget` / `Scoop` / `Chocolatey` で配布（企業内展開向け）
 
-最初の一歩としては、`npm run dist:win` で作った `release/BcwTerminal-<version>-portable.exe` を GitHub Releases に上げる運用が最も現実的です。さらにブロック率を下げるなら、次段でコード署名証明書を導入してください。
+最初の一歩としては、`npm run dist:win` で作った `release/*.exe` を GitHub Releases に上げる運用が最も現実的です。さらにブロック率を下げるなら、次段でコード署名証明書を導入してください。
 
 どうしても Google Drive を使う場合は、利用者向け手順として次を案内してください。
 
 ```powershell
-Unblock-File -Path .\BcwTerminal-<version>-portable.exe
+Unblock-File -Path .\BcwTerminal-<version>.exe
 ```
 
 ### GitHub Releases 自動公開 (最小構成)
 
-このリポジトリには、`v*` タグ push 時に Windows portable をビルドして GitHub Releases へ自動公開する workflow を追加済みです。
+このリポジトリには、`v*` タグ push 時に Windows ビルド（portable + setup）を作成し、GitHub Releases へ自動公開する workflow を追加済みです。
 
 ```powershell
 git tag v0.1.1
 git push origin v0.1.1
 ```
 
-成功すると `release/*-portable.exe` が `v0.1.1` の Release に添付されます。
+成功すると `release/*.exe`, `release/latest.yml`, `release/*.blockmap` が `v0.1.1` の Release に添付されます。
+
+## 自動更新 (Auto Update)
+
+- アプリ設定の `アプリ更新` から更新確認できます。
+- 更新がダウンロード済みになると `更新を適用` で再起動インストールできます。
+- 自動更新はパッケージ化した Windows アプリで有効です（開発モードでは無効）。
 
 ## ディレクトリ構成
 

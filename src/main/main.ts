@@ -11,6 +11,7 @@ import {
   shell,
 } from 'electron';
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch';
+import { autoUpdater } from 'electron-updater';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,6 +19,7 @@ import path from 'node:path';
 const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
+const APP_UPDATE_STATUS = 'app:update-status';
 
 type TerminalSession = {
   id: string;
@@ -41,6 +43,22 @@ type SmartAppControlState = {
   detail?: string;
 };
 
+type AppUpdateState = {
+  error?: string;
+  progress?: number;
+  supported: boolean;
+  updateVersion?: string;
+  status:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'downloaded'
+    | 'up-to-date'
+    | 'error'
+    | 'unsupported';
+};
+
 let mainWindow: BrowserWindow | null = null;
 let sessionCounter = 0;
 let appLocale: AppLocale = 'ja';
@@ -50,6 +68,10 @@ const DEFAULT_WINDOW_STATE: WindowStateSnapshot = {
   height: 780,
   alwaysOnTop: false,
   isMaximized: false,
+};
+let appUpdateState: AppUpdateState = {
+  supported: false,
+  status: 'idle',
 };
 
 const MENU_TEXT = {
@@ -131,6 +153,14 @@ function sendToRenderer(channel: string, payload: unknown) {
   }
 
   mainWindow.webContents.send(channel, payload);
+}
+
+function setAppUpdateState(next: Partial<AppUpdateState>) {
+  appUpdateState = {
+    ...appUpdateState,
+    ...next,
+  };
+  sendToRenderer(APP_UPDATE_STATUS, appUpdateState);
 }
 
 function getWindowStateFilePath() {
@@ -222,6 +252,84 @@ function createWindow() {
   }
 
   void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+}
+
+function isAutoUpdateSupported() {
+  return process.platform === 'win32' && !process.env.VITE_DEV_SERVER_URL;
+}
+
+function setupAutoUpdater() {
+  if (!isAutoUpdateSupported()) {
+    setAppUpdateState({
+      supported: false,
+      status: 'unsupported',
+    });
+    return;
+  }
+
+  setAppUpdateState({
+    supported: true,
+    status: 'idle',
+  });
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    setAppUpdateState({
+      error: undefined,
+      progress: undefined,
+      status: 'checking',
+      updateVersion: undefined,
+    });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    setAppUpdateState({
+      error: undefined,
+      status: 'available',
+      updateVersion: info.version,
+    });
+  });
+
+  autoUpdater.on('download-progress', (progressInfo) => {
+    setAppUpdateState({
+      progress: progressInfo.percent,
+      status: 'downloading',
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    setAppUpdateState({
+      progress: 100,
+      status: 'downloaded',
+      updateVersion: info.version,
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    setAppUpdateState({
+      progress: undefined,
+      status: 'up-to-date',
+      updateVersion: undefined,
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    setAppUpdateState({
+      error: error.message,
+      progress: undefined,
+      status: 'error',
+    });
+  });
+
+  void autoUpdater.checkForUpdates().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    setAppUpdateState({
+      error: message,
+      status: 'error',
+    });
+  });
 }
 
 function updateApplicationMenu(locale: AppLocale) {
@@ -434,6 +542,29 @@ ipcMain.handle('app:set-locale', (_event, locale: AppLocale) => {
 });
 
 ipcMain.handle('system:get-smart-app-control-state', () => getSmartAppControlState());
+ipcMain.handle('app:update:get-state', () => appUpdateState);
+ipcMain.handle('app:update:check', async () => {
+  if (!isAutoUpdateSupported()) {
+    return {
+      started: false,
+      supported: false,
+    };
+  }
+
+  await autoUpdater.checkForUpdates();
+  return {
+    started: true,
+    supported: true,
+  };
+});
+ipcMain.handle('app:update:install', () => {
+  if (!isAutoUpdateSupported() || appUpdateState.status !== 'downloaded') {
+    return { started: false };
+  }
+
+  autoUpdater.quitAndInstall();
+  return { started: true };
+});
 
 ipcMain.handle('window:get-state', () => {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -517,6 +648,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId('BuildCooperWorks.BcwTerminal');
   updateApplicationMenu(appLocale);
   createWindow();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

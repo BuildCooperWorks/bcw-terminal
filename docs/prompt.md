@@ -39,3 +39,5 @@
 - 配布は Google Drive でダウンロードにしているんだけど、ダウンロード解凍して実行するとブロックされるんだ。他に良さげな配布方法はないかなあ？
 
 - mkdir new-folder だとフォルダー名は指定できないよね？
+
+- プロジェクトページを開くのリンク先はこちら「https://github.com/BuildCooperWorks/bcw-terminal」

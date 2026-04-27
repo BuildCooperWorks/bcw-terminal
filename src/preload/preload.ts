@@ -1,8 +1,16 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { TerminalCwdEvent, TerminalExitEvent, TerminalOutputEvent } from './types';
+import type { AppUpdateState, TerminalCwdEvent, TerminalExitEvent, TerminalOutputEvent } from './types';
 
 const terminalApi = {
+  checkForAppUpdate: () => ipcRenderer.invoke('app:update:check'),
   createSession: () => ipcRenderer.invoke('terminal:create-session'),
+  getAppUpdateState: async () => {
+    try {
+      return await ipcRenderer.invoke('app:update:get-state');
+    } catch {
+      return { supported: false, status: 'unsupported' as const };
+    }
+  },
   getSmartAppControlState: async () => {
     try {
       return await ipcRenderer.invoke('system:get-smart-app-control-state');
@@ -35,6 +43,13 @@ const terminalApi = {
     ipcRenderer.send('terminal:resize', { sessionId, cols, rows }),
   stop: (sessionId: string) => ipcRenderer.send('terminal:stop', sessionId),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  installDownloadedAppUpdate: () => ipcRenderer.invoke('app:update:install'),
+  onAppUpdateStatus: (callback: (event: AppUpdateState) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: AppUpdateState) => callback(payload);
+    ipcRenderer.on('app:update-status', listener);
+
+    return () => ipcRenderer.removeListener('app:update-status', listener);
+  },
   onOutput: (callback: (event: TerminalOutputEvent) => void) => {
     const listener = (_event: IpcRendererEvent, payload: TerminalOutputEvent) => callback(payload);
     ipcRenderer.on('terminal:output', listener);

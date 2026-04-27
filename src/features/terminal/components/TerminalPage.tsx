@@ -118,10 +118,28 @@ type SmartAppControlStatus = {
   detail?: string;
 };
 
+type AppUpdateStatus = {
+  error?: string;
+  progress?: number;
+  supported: boolean;
+  updateVersion?: string;
+  status:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'downloaded'
+    | 'up-to-date'
+    | 'error'
+    | 'unsupported';
+};
+
 const BUILT_IN_MENU_ORDER: BuiltInMenuKey[] = ['claude', 'chatgpt', 'git', 'ls', 'dir', 'network'];
 
 const LOCALE_TEXT = {
   en: {
+    appUpdate: 'App update',
+    appUpdateDescription: 'Check for new versions from GitHub Releases and apply downloaded updates.',
     activityIdle: 'Idle',
     activityRunning: 'Running',
     activityStopped: 'Stopped',
@@ -195,6 +213,8 @@ const LOCALE_TEXT = {
     openCommandManagerTooltip: 'Open command manager to edit command groups.',
     closeDialogTooltip: 'Close this dialog.',
     createSessionTooltip: 'Start a new PowerShell session.',
+    checkUpdates: 'Check updates',
+    installUpdate: 'Install update',
     stopSessionTooltip: 'Stop this session.',
     terminalBackgroundColor: 'Terminal background color',
     terminalTextColor: 'Terminal text color',
@@ -206,8 +226,18 @@ const LOCALE_TEXT = {
     statusReady: 'Ready',
     statusStarting: 'Starting',
     statusStopped: 'Stopped',
+    updateStatusAvailable: 'Update available',
+    updateStatusChecking: 'Checking for update...',
+    updateStatusDownloaded: 'Update downloaded. Restart to apply.',
+    updateStatusDownloading: 'Downloading update...',
+    updateStatusError: 'Update check failed.',
+    updateStatusIdle: 'Ready to check updates.',
+    updateStatusUnsupported: 'Auto update is available in packaged Windows app.',
+    updateStatusUpToDate: 'You are up to date.',
   },
   ja: {
+    appUpdate: 'アプリ更新',
+    appUpdateDescription: 'GitHub Releases から新しいバージョンを確認し、ダウンロード済み更新を適用します。',
     activityIdle: '待機中',
     activityRunning: '実行中',
     activityStopped: '停止中',
@@ -281,6 +311,8 @@ const LOCALE_TEXT = {
     openCommandManagerTooltip: 'コマンド管理画面を開きます。',
     closeDialogTooltip: 'このダイアログを閉じます。',
     createSessionTooltip: '新しい PowerShell セッションを起動します。',
+    checkUpdates: '更新を確認',
+    installUpdate: '更新を適用',
     stopSessionTooltip: 'このセッションを停止します。',
     terminalBackgroundColor: 'ターミナル背景色',
     terminalTextColor: 'ターミナル文字色',
@@ -292,6 +324,14 @@ const LOCALE_TEXT = {
     statusReady: 'Ready',
     statusStarting: '起動中',
     statusStopped: '停止中',
+    updateStatusAvailable: '更新があります',
+    updateStatusChecking: '更新を確認中...',
+    updateStatusDownloaded: '更新のダウンロードが完了しました。再起動して適用できます。',
+    updateStatusDownloading: '更新をダウンロード中...',
+    updateStatusError: '更新の確認に失敗しました。',
+    updateStatusIdle: '更新確認の準備ができています。',
+    updateStatusUnsupported: '自動更新はパッケージ化した Windows アプリで利用できます。',
+    updateStatusUpToDate: '最新バージョンです。',
   },
 } as const;
 
@@ -707,6 +747,33 @@ function getStatusDescription(status: TerminalSessionView['status'], locale: App
   return 'PowerShell session is stopped.';
 }
 
+function getAppUpdateStatusText(update: AppUpdateStatus, locale: AppLocale) {
+  const text = LOCALE_TEXT[locale];
+  switch (update.status) {
+    case 'checking':
+      return text.updateStatusChecking;
+    case 'available':
+      return update.updateVersion ? `${text.updateStatusAvailable}: v${update.updateVersion}` : text.updateStatusAvailable;
+    case 'downloading':
+      return update.progress != null
+        ? `${text.updateStatusDownloading} (${Math.round(update.progress)}%)`
+        : text.updateStatusDownloading;
+    case 'downloaded':
+      return update.updateVersion
+        ? `${text.updateStatusDownloaded} (v${update.updateVersion})`
+        : text.updateStatusDownloaded;
+    case 'up-to-date':
+      return text.updateStatusUpToDate;
+    case 'error':
+      return update.error ? `${text.updateStatusError} ${update.error}` : text.updateStatusError;
+    case 'unsupported':
+      return text.updateStatusUnsupported;
+    case 'idle':
+    default:
+      return text.updateStatusIdle;
+  }
+}
+
 function makeGroupId() {
   return `custom-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -732,6 +799,7 @@ export function TerminalPage() {
 
   const [settings, setSettings] = useState<PageSettings>(loadSettings);
   const [smartAppControl, setSmartAppControl] = useState<SmartAppControlStatus>({ status: 'unknown' });
+  const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>({ supported: false, status: 'idle' });
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>(loadHistory);
   const [commandConfigJson, setCommandConfigJson] = useState('');
   const [commandConfigMessage, setCommandConfigMessage] = useState('');
@@ -838,6 +906,29 @@ export function TerminalPage() {
     });
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void window.bcwTerminal.getAppUpdateState().then((state) => {
+      if (!active) {
+        return;
+      }
+      setAppUpdate(state);
+    });
+
+    const unsubscribe = window.bcwTerminal.onAppUpdateStatus((state) => {
+      if (!active) {
+        return;
+      }
+      setAppUpdate(state);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
     };
   }, []);
 
@@ -964,6 +1055,28 @@ export function TerminalPage() {
     window.requestAnimationFrame(() => {
       focusTerminal();
     });
+  };
+
+  const handleCheckForAppUpdate = async () => {
+    try {
+      await window.bcwTerminal.checkForAppUpdate();
+    } catch {
+      setAppUpdate((current) => ({
+        ...current,
+        status: 'error',
+      }));
+    }
+  };
+
+  const handleInstallDownloadedUpdate = async () => {
+    try {
+      await window.bcwTerminal.installDownloadedAppUpdate();
+    } catch {
+      setAppUpdate((current) => ({
+        ...current,
+        status: 'error',
+      }));
+    }
   };
 
   const handleStopSession = (session: TerminalSessionView) => {
@@ -1745,6 +1858,32 @@ export function TerminalPage() {
             {smartAppControl.status === 'eval' ? (
               <Typography className="terminal-settings-warning">{text.smartAppControlEvalWarning}</Typography>
             ) : null}
+
+            <Box>
+              <Typography className="terminal-settings-label">{text.appUpdate}</Typography>
+              <Typography className="terminal-settings-description">{text.appUpdateDescription}</Typography>
+              <Typography className="terminal-settings-description">
+                {getAppUpdateStatusText(appUpdate, settings.locale)}
+              </Typography>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 1 }}>
+                <Button
+                  variant="outlined"
+                  onClick={() => void handleCheckForAppUpdate()}
+                  disabled={!appUpdate.supported || appUpdate.status === 'checking' || appUpdate.status === 'downloading'}
+                >
+                  {text.checkUpdates}
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={() => void handleInstallDownloadedUpdate()}
+                  disabled={appUpdate.status !== 'downloaded'}
+                >
+                  {text.installUpdate}
+                </Button>
+              </Stack>
+            </Box>
+
+            <Divider />
 
             <Box>
               <Typography className="terminal-settings-label">{text.language}</Typography>
