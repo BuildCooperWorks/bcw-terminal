@@ -130,6 +130,11 @@ git push origin v0.1.1
 - アプリ設定の `アプリ更新` から更新確認できます。
 - 更新がダウンロード済みになると `更新を適用` で再起動インストールできます。
 - 自動更新はパッケージ化した Windows アプリで有効です（開発モードでは無効）。
+- このリポジトリは private のため、GitHub Releases から自動更新する場合はアプリ起動環境に `GH_TOKEN` または `GITHUB_TOKEN` が必要です。
+  ```powershell
+  setx GH_TOKEN "<GitHub personal access token>"
+  ```
+  設定後に BcwTerminal を起動し直してください。トークン未設定時は更新確認を実行せず、設定画面に案内メッセージを表示します。
 
 ## ディレクトリ構成
 

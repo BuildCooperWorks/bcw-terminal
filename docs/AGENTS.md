@@ -308,3 +308,8 @@ src/
 - Fixed copy behavior: copied selection is cleared after successful clipboard write.
 - Adjusted focus/selection interaction so mouse drag selection remains available.
 - Added `scripts/patch-node-pty-spectre.cjs` and `postinstall` wiring for native rebuild stability.
+## 31. 2026-04-28 追加更新 (private GitHub Releases 自動更新)
+- GitHub repo が private のため、`electron-updater` の GitHub publish 設定に `private: true` を追加。
+- パッケージ化アプリの自動更新は `GH_TOKEN` または `GITHUB_TOKEN` が起動環境にある場合のみ実行する方針へ変更。
+- トークン未設定時は GitHub の公開 `releases.atom` へアクセスせず、設定画面に短い案内メッセージを表示するようにした。
+- 更新エラー表示は HTTP headers を含む長文をそのまま出さず、読みやすい短文へ整形する。

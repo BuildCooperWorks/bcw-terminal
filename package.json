@@ -1,6 +1,6 @@
 {
   "name": "bcw-terminal",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "private": true,
   "description": "BcwTerminal - a local developer command dashboard for Windows.",
   "main": "dist/main/main.js",
@@ -57,7 +57,8 @@
       {
         "provider": "github",
         "owner": "BuildCooperWorks",
-        "repo": "bcw-terminal"
+        "repo": "bcw-terminal",
+        "private": true
       }
     ]
   },
