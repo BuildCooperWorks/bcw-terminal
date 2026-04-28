@@ -317,3 +317,7 @@ src/
 - 配布運用を public GitHub Releases 前提へ変更。
 - `electron-updater` の GitHub publish 設定から `private: true` を削除し、利用者側 token なしで更新確認できる構成へ戻した。
 - `GH_TOKEN` / `GITHUB_TOKEN` 未設定時に更新確認を止める処理を削除した。
+## 33. 2026-04-28 追加更新 (Release運用メモ)
+- このリポジトリの GitHub Release は `v*` タグ push 時のみ更新される。
+- `main` push のみでは Release の Latest は進まない。
+- バージョン更新テスト時は「version変更コミットを `main` へ push」後に、同じ version の `v<version>` タグを push することを運用ルールにする。

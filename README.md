@@ -118,12 +118,27 @@ Unblock-File -Path .\BcwTerminal-<version>.exe
 
 このリポジトリには、`v*` タグ push 時に Windows ビルド（portable + setup）を作成し、GitHub Releases へ自動公開する workflow を追加済みです。
 
+重要:
+- `main` への push だけでは Release は更新されません。
+- Release 更新は `v<version>` タグの push が必須です。
+- バージョン更新テスト時も「`package.json` 更新 + `main` push + タグ push」を1セットにしてください。
+
 ```powershell
 git tag v0.1.1
 git push origin v0.1.1
 ```
 
 成功すると `release/*.exe`, `release/latest.yml`, `release/*.blockmap` が `v0.1.1` の Release に添付されます。
+
+推奨手順:
+```powershell
+# 1) version更新をcommitしてmainへpush
+git push origin main
+
+# 2) 同じversionでタグを作ってpush
+git tag v<package.jsonのversion>
+git push origin v<package.jsonのversion>
+```
 
 ## 自動更新 (Auto Update)
 
