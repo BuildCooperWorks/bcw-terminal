@@ -20,16 +20,6 @@ const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
 const APP_UPDATE_STATUS = 'app:update-status';
-const PRIVATE_GITHUB_UPDATE_FEED = {
-  provider: 'github' as const,
-  owner: 'BuildCooperWorks',
-  repo: 'bcw-terminal',
-  private: true,
-};
-const PRIVATE_GITHUB_UPDATE_TOKEN_MESSAGES = {
-  en: 'Private GitHub Releases require GH_TOKEN or GITHUB_TOKEN to check for app updates.',
-  ja: 'private GitHub Releases の更新確認には GH_TOKEN または GITHUB_TOKEN が必要です。',
-} as const;
 
 type TerminalSession = {
   id: string;
@@ -250,33 +240,11 @@ function isAutoUpdateSupported() {
   return process.platform === 'win32' && !process.env.VITE_DEV_SERVER_URL;
 }
 
-function getPrivateGitHubUpdateToken() {
-  return process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-}
-
-function getPrivateGitHubUpdateTokenMessage() {
-  return PRIVATE_GITHUB_UPDATE_TOKEN_MESSAGES[appLocale];
-}
-
 function getReadableAutoUpdateError(error: Error) {
   const message = error.message || String(error);
-  if (message.includes('releases.atom') && message.includes('404')) {
-    return getPrivateGitHubUpdateTokenMessage();
-  }
-
   const withoutHeaders = message.split(/\r?\nHeaders:/)[0] ?? message;
   const singleLine = withoutHeaders.replace(/\s+/g, ' ').trim();
   return singleLine.length > 280 ? `${singleLine.slice(0, 277)}...` : singleLine;
-}
-
-function setMissingPrivateGitHubTokenState() {
-  setAppUpdateState({
-    error: getPrivateGitHubUpdateTokenMessage(),
-    progress: undefined,
-    status: 'error',
-    supported: true,
-    updateVersion: undefined,
-  });
 }
 
 function setupAutoUpdater() {
@@ -288,17 +256,11 @@ function setupAutoUpdater() {
     return;
   }
 
-  if (!getPrivateGitHubUpdateToken()) {
-    setMissingPrivateGitHubTokenState();
-    return;
-  }
-
   setAppUpdateState({
     supported: true,
     status: 'idle',
   });
 
-  autoUpdater.setFeedURL(PRIVATE_GITHUB_UPDATE_FEED);
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -535,13 +497,6 @@ ipcMain.handle('app:update:check', async () => {
     return {
       started: false,
       supported: false,
-    };
-  }
-  if (!getPrivateGitHubUpdateToken()) {
-    setMissingPrivateGitHubTokenState();
-    return {
-      started: false,
-      supported: true,
     };
   }
 

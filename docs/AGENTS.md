@@ -313,3 +313,7 @@ src/
 - パッケージ化アプリの自動更新は `GH_TOKEN` または `GITHUB_TOKEN` が起動環境にある場合のみ実行する方針へ変更。
 - トークン未設定時は GitHub の公開 `releases.atom` へアクセスせず、設定画面に短い案内メッセージを表示するようにした。
 - 更新エラー表示は HTTP headers を含む長文をそのまま出さず、読みやすい短文へ整形する。
+## 32. 2026-04-28 追加更新 (public GitHub Releases 自動更新)
+- 配布運用を public GitHub Releases 前提へ変更。
+- `electron-updater` の GitHub publish 設定から `private: true` を削除し、利用者側 token なしで更新確認できる構成へ戻した。
+- `GH_TOKEN` / `GITHUB_TOKEN` 未設定時に更新確認を止める処理を削除した。
