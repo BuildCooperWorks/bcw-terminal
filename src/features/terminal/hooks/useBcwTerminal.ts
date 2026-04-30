@@ -3,7 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import type { TerminalStatus } from '../types/terminal';
 
-const MAX_BUFFER_LENGTH = 180_000;
+const MAX_BUFFER_LENGTH = 60_000;
 const IDLE_AFTER_MS = 5_000;
 
 export type TerminalSettings = {
@@ -39,6 +39,14 @@ function stripControlSequences(value: string) {
     .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
 }
 
+function stripTerminalOutputControls(value: string) {
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-_]/g, '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+}
+
 function getTerminalTheme(settings: TerminalSettings) {
   return {
     background: settings.terminalBackgroundColor,
@@ -70,6 +78,7 @@ function createTerminal(settings: TerminalSettings) {
     fontFamily: settings.fontFamily,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
+    scrollback: 800,
     theme: getTerminalTheme(settings),
   });
 }
@@ -81,6 +90,11 @@ function toPreview(buffer: string) {
     .filter(Boolean)
     .slice(-5)
     .join('\n');
+}
+
+function appendPreviewTail(previousPreview: string, output: string) {
+  const merged = `${previousPreview}\n${stripAnsi(output)}`.slice(-4_000);
+  return toPreview(merged);
 }
 
 function inferIntent(command: string, output: string) {
@@ -320,7 +334,7 @@ export function useBcwTerminal(settings: TerminalSettings) {
                 status: 'ready',
                 activity: 'running',
                 intent: inferIntent(session.lastCommand, cleanedOutput),
-                preview: toPreview(nextBuffer),
+                preview: appendPreviewTail(session.preview, output),
                 url: url ?? session.url,
               }
             : session,
@@ -447,6 +461,15 @@ export function useBcwTerminal(settings: TerminalSettings) {
     return terminalRef.current?.getSelection() ?? '';
   }, []);
 
+  const getActiveBufferText = useCallback(() => {
+    const sessionId = activeIdRef.current;
+    if (!sessionId) {
+      return '';
+    }
+
+    return stripTerminalOutputControls(buffersRef.current.get(sessionId) ?? '').trimEnd();
+  }, []);
+
   const clearSelection = useCallback(() => {
     terminalRef.current?.clearSelection();
   }, []);
@@ -475,5 +498,6 @@ export function useBcwTerminal(settings: TerminalSettings) {
     sessions,
     closeSession,
     stopSession,
+    getActiveBufferText,
   };
 }

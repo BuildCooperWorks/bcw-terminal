@@ -29,6 +29,7 @@ const terminalApi = {
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   saveCommandConfigFile: (content: string, currentPath?: string) =>
     ipcRenderer.invoke('command-config:save-file', { content, currentPath }),
+  saveTerminalOutputFile: (content: string) => ipcRenderer.invoke('terminal-output:save-file', { content }),
   setAlwaysOnTop: async (value: boolean) => {
     try {
       await ipcRenderer.invoke('window:set-always-on-top', value);

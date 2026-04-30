@@ -1,6 +1,6 @@
 {
   "name": "bcw-terminal",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "BcwTerminal - a local developer command dashboard for Windows.",
   "main": "dist/main/main.js",
@@ -86,7 +86,7 @@
     "electron-builder": "^26.8.1",
     "png-to-ico": "^3.0.1",
     "typescript": "^5.4.5",
-    "vite": "^5.2.11",
+    "vite": "^6.4.2",
     "wait-on": "^7.2.0"
   }
 }

@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import BoltIcon from '@mui/icons-material/Bolt';
@@ -17,6 +17,7 @@ import GitHubIcon from '@mui/icons-material/GitHub';
 import HistoryIcon from '@mui/icons-material/History';
 import LanIcon from '@mui/icons-material/Lan';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -163,7 +164,7 @@ const LOCALE_TEXT = {
     dropdownItemDescription: 'Item description',
     dropdownItemLabel: 'Item label',
     editButton: 'Edit',
-    editTooltip: 'Copy / paste / interrupt / clear',
+    editTooltip: 'Copy / paste / save / interrupt / clear',
     fontFamily: 'Font family',
     fontSize: 'Font size',
     groupTarget: 'Target group',
@@ -171,6 +172,8 @@ const LOCALE_TEXT = {
     hideSidebarWhenSingleSession: 'Hide sidebar when single session',
     historyButton: 'History',
     historyTooltip: 'Recent command history',
+    clearHistory: 'Clear history',
+    clearHistoryDescription: 'Remove saved command history.',
     jsonApply: 'Apply JSON',
     jsonApplyTooltip: 'Apply JSON content to command groups and overwrite current command configuration.',
     jsonEditor: 'JSON editor',
@@ -195,6 +198,8 @@ const LOCALE_TEXT = {
     newGroupTooltip: 'Create a new editable custom command group.',
     noHistory: 'No command history yet.',
     pasteClipboard: 'Paste clipboard',
+    saveTerminalOutput: 'Save terminal output',
+    saveTerminalOutputDescription: 'Save the active terminal content as a text file.',
     powerShellStarting: 'Starting PowerShell',
     cancel: 'Cancel',
     create: 'Create',
@@ -261,7 +266,7 @@ const LOCALE_TEXT = {
     dropdownItemDescription: '項目説明',
     dropdownItemLabel: '項目名',
     editButton: '編集',
-    editTooltip: 'コピー / 貼り付け / 割り込み / クリア',
+    editTooltip: 'コピー / 貼り付け / 保存 / 割り込み / クリア',
     fontFamily: 'フォント',
     fontSize: 'フォントサイズ',
     groupTarget: '編集対象グループ',
@@ -269,6 +274,8 @@ const LOCALE_TEXT = {
     hideSidebarWhenSingleSession: '単一セッション時はサイドバーを非表示',
     historyButton: '履歴',
     historyTooltip: '最近のコマンド履歴',
+    clearHistory: '履歴をクリア',
+    clearHistoryDescription: '保存済みのコマンド履歴を削除します。',
     jsonApply: 'JSONを反映',
     jsonApplyTooltip: 'JSON内容を現在のコマンド設定へ反映して上書きします。',
     jsonEditor: 'JSON編集',
@@ -293,6 +300,8 @@ const LOCALE_TEXT = {
     newGroupTooltip: '編集可能なカスタムコマンドグループを新規作成します。',
     noHistory: '履歴はまだありません。',
     pasteClipboard: 'クリップボードを貼り付け',
+    saveTerminalOutput: 'ターミナル出力を保存',
+    saveTerminalOutputDescription: 'アクティブなターミナル内容をテキストファイルに保存します。',
     powerShellStarting: 'PowerShell を起動中',
     cancel: 'キャンセル',
     create: '作成',
@@ -397,6 +406,7 @@ const DEFAULT_MENU_CONFIGS: CommandMenuConfigs = {
       { label: '隠し含む', command: 'dir /a', description: '隠しファイルを含めて表示します。' },
       { label: '詳細', command: 'dir /q', description: '所有者情報付きで表示します。' },
       { label: '日付順', command: 'dir /o:-d', description: '更新日時の降順で表示します。' },
+      { label: 'tree', command: 'tree', description: '現在ディレクトリ配下のフォルダー構成を表示します。' },
       { label: '現在位置', command: 'Get-Location', description: '現在の作業ディレクトリを表示します。' },
       { label: '1階層上へ', command: 'cd ..', description: '親ディレクトリへ移動します。' },
       { label: 'ホームへ', command: 'cd ~', description: 'ホームディレクトリへ移動します。' },
@@ -858,6 +868,7 @@ export function TerminalPage() {
     closeSession,
     createSession,
     fit,
+    getActiveBufferText,
     getSelectionText,
     clearSelection,
     focusTerminal,
@@ -1126,6 +1137,20 @@ export function TerminalPage() {
     });
   };
 
+  const handleTerminalContextMenu = async (event: MouseEvent<HTMLDivElement>) => {
+    const selectedText = getSelectionText() || window.getSelection()?.toString() || '';
+    if (!selectedText.trim()) {
+      return;
+    }
+
+    event.preventDefault();
+    await window.bcwTerminal.writeClipboardText(selectedText);
+    clearSelection();
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
+  };
+
   const handlePasteClipboard = async () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
@@ -1161,6 +1186,23 @@ export function TerminalPage() {
     });
   };
 
+  const handleSaveTerminalOutput = async () => {
+    const output = getActiveBufferText();
+    if (!output.trim()) {
+      setEditMenuAnchor(null);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
+      return;
+    }
+
+    await window.bcwTerminal.saveTerminalOutputFile(output);
+    setEditMenuAnchor(null);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
+  };
+
   const handleSendCtrlC = () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
@@ -1172,6 +1214,14 @@ export function TerminalPage() {
 
     window.bcwTerminal.sendData(activeSessionId, '\x03');
     setEditMenuAnchor(null);
+    window.requestAnimationFrame(() => {
+      focusTerminal();
+    });
+  };
+
+  const handleClearHistory = () => {
+    setCommandHistory([]);
+    setHistoryMenuAnchor(null);
     window.requestAnimationFrame(() => {
       focusTerminal();
     });
@@ -1349,17 +1399,12 @@ export function TerminalPage() {
           <Box className="terminal-mark">
             <TerminalIcon fontSize="small" />
           </Box>
-          <Box minWidth={0}>
-            <Typography variant="h1" noWrap>
-              BcwTerminal
+          <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
+            <FolderOutlinedIcon className="terminal-path-icon" fontSize="inherit" />
+            <Typography className="terminal-path" variant="body2" noWrap>
+              {cwd || text.powerShellStarting}
             </Typography>
-            <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-              <FolderOutlinedIcon className="terminal-path-icon" fontSize="inherit" />
-              <Typography className="terminal-path" variant="body2" noWrap>
-                {cwd || text.powerShellStarting}
-              </Typography>
-            </Stack>
-          </Box>
+          </Stack>
         </Stack>
 
         <Stack direction="row" alignItems="center" spacing={1}>
@@ -1687,7 +1732,7 @@ export function TerminalPage() {
         {isButtonVisible('edit') ? (
           <>
             <Tooltip title={text.editTooltip}>
-              <span>
+              <span className="terminal-shortcut-system terminal-shortcut-system-start">
                 <Button
                   className="terminal-shortcut-button"
                   disabled={!activeSession || activeSession.status === 'stopped'}
@@ -1713,6 +1758,12 @@ export function TerminalPage() {
                   <ContentPasteIcon fontSize="small" />
                 </ListItemIcon>
                 <ListItemText primary={text.pasteClipboard} />
+              </MenuItem>
+              <MenuItem onClick={() => void handleSaveTerminalOutput()}>
+                <ListItemIcon>
+                  <SaveAltIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={text.saveTerminalOutput} secondary={text.saveTerminalOutputDescription} />
               </MenuItem>
               <MenuItem onClick={handleSendCtrlC}>
                 <ListItemIcon>
@@ -1740,7 +1791,9 @@ export function TerminalPage() {
         {isButtonVisible('history') ? (
           <>
             <Tooltip title={text.historyTooltip}>
-              <span>
+              <span
+                className={`terminal-shortcut-system${isButtonVisible('edit') ? '' : ' terminal-shortcut-system-start'}`}
+              >
                 <Button
                   className="terminal-shortcut-button"
                   disabled={!activeSession || activeSession.status === 'stopped'}
@@ -1779,6 +1832,13 @@ export function TerminalPage() {
                   </MenuItem>
                 ))
               )}
+              <Divider />
+              <MenuItem onClick={handleClearHistory} disabled={commandHistory.length === 0}>
+                <ListItemIcon>
+                  <DeleteOutlineIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={text.clearHistory} secondary={text.clearHistoryDescription} />
+              </MenuItem>
             </Menu>
           </>
         ) : null}
@@ -1786,7 +1846,7 @@ export function TerminalPage() {
 
       <Box className={`terminal-workspace${shouldShowSidebar ? '' : ' is-sidebar-hidden'}`}>
         <Box className="terminal-shell">
-          <Box ref={hostRef} className="terminal-host" />
+          <Box ref={hostRef} className="terminal-host" onContextMenu={(event) => void handleTerminalContextMenu(event)} />
         </Box>
 
         {shouldShowSidebar ? (
@@ -2317,4 +2377,3 @@ export function TerminalPage() {
     </Box>
   );
 }
-

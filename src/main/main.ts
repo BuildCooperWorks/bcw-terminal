@@ -16,6 +16,14 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const isDevMode = Boolean(process.env.VITE_DEV_SERVER_URL);
+
+if (isDevMode) {
+  // Avoid cache/session path contention between rapid dev restarts on Windows.
+  const devSessionRoot = path.join(app.getPath('temp'), 'bcw-terminal-dev-session', String(process.pid));
+  app.setPath('sessionData', devSessionRoot);
+}
+
 const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
@@ -107,10 +115,9 @@ const MENU_TEXT = {
 
 function getDefaultStartupCwd() {
   if (process.platform === 'win32') {
-    const systemDrive = process.env.SystemDrive || 'C:';
-    const normalized = systemDrive.endsWith('\\') ? systemDrive : `${systemDrive}\\`;
-    if (fs.existsSync(normalized)) {
-      return normalized;
+    const home = app.getPath('home') || process.env.USERPROFILE;
+    if (home && fs.existsSync(home)) {
+      return home;
     }
   }
 
@@ -134,7 +141,20 @@ function sendToRenderer(channel: string, payload: unknown) {
     return;
   }
 
-  mainWindow.webContents.send(channel, payload);
+  const { webContents } = mainWindow;
+  if (webContents.isDestroyed() || webContents.isCrashed()) {
+    return;
+  }
+
+  try {
+    webContents.send(channel, payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Render frame was disposed')) {
+      return;
+    }
+    throw error;
+  }
 }
 
 function setAppUpdateState(next: Partial<AppUpdateState>) {
@@ -230,10 +250,13 @@ function createWindow() {
   if (process.env.VITE_DEV_SERVER_URL) {
     void mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools({ mode: 'detach' });
-    return;
+  } else {
+    void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
 
-  void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[renderer] process gone: reason=${details.reason}, exitCode=${details.exitCode}`);
+  });
 }
 
 function isAutoUpdateSupported() {
@@ -587,6 +610,27 @@ ipcMain.handle(
     };
   },
 );
+
+ipcMain.handle('terminal-output:save-file', async (_event, payload: { content: string }) => {
+  const ownerWindow = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const options: SaveDialogOptions = {
+    title: 'Save terminal output',
+    defaultPath: `bcw-terminal-output-${timestamp}.txt`,
+    filters: [{ name: 'Text', extensions: ['txt'] }, { name: 'All Files', extensions: ['*'] }],
+  };
+  const saveResult = ownerWindow ? await dialog.showSaveDialog(ownerWindow, options) : await dialog.showSaveDialog(options);
+
+  if (saveResult.canceled || !saveResult.filePath) {
+    return { canceled: true };
+  }
+
+  fs.writeFileSync(saveResult.filePath, payload.content ?? '', 'utf8');
+  return {
+    canceled: false,
+    path: saveResult.filePath,
+  };
+});
 
 ipcMain.handle('clipboard:read-text', () => clipboard.readText());
 ipcMain.handle('clipboard:write-text', (_event, value: string) => {
