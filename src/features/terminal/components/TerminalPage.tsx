@@ -11,11 +11,11 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
-import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import HistoryIcon from '@mui/icons-material/History';
 import LanIcon from '@mui/icons-material/Lan';
+import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -222,6 +222,15 @@ const LOCALE_TEXT = {
     stopSessionTooltip: 'Stop this session.',
     terminalBackgroundColor: 'Terminal background color',
     terminalTextColor: 'Terminal text color',
+    terminalTips: [
+      'Tip: Press Tab while typing a path or command to cycle completion candidates.',
+      'Tip: Use Ctrl+C to interrupt a running command.',
+      'Tip: Click a history item to run it again.',
+      'Tip: Select terminal text and right-click to copy it.',
+      'Tip: Save the active terminal output from Edit.',
+    ],
+    updateTipAvailable: 'Update available. Open Settings to check and apply it.',
+    updateTipDownloaded: 'Update downloaded. Open Settings to apply it.',
     addItemTooltip: 'Add a new command item to the selected group.',
     showSessionSidebar: 'Show session sidebar',
     sidebarAutoHidden: 'Sidebar hidden in single-session mode',
@@ -324,6 +333,15 @@ const LOCALE_TEXT = {
     stopSessionTooltip: 'このセッションを停止します。',
     terminalBackgroundColor: 'ターミナル背景色',
     terminalTextColor: 'ターミナル文字色',
+    terminalTips: [
+      'Tips: 入力途中で Tab キーを押すと、候補を補完できます。',
+      'Tips: 実行中のコマンドは Ctrl+C で中断できます。',
+      'Tips: 履歴の項目をクリックすると、もう一度実行できます。',
+      'Tips: ターミナルの選択範囲を右クリックするとコピーできます。',
+      'Tips: 編集メニューからアクティブなターミナル内容を保存できます。',
+    ],
+    updateTipAvailable: 'バージョンアップがあります。設定から確認・適用できます。',
+    updateTipDownloaded: '更新のダウンロードが完了しました。設定から適用できます。',
     addItemTooltip: '選択中グループにコマンド項目を追加します。',
     showSessionSidebar: 'セッションサイドバーを表示',
     sidebarAutoHidden: '単一セッションではサイドバーを自動非表示',
@@ -804,6 +822,17 @@ function getAppUpdateStatusText(update: AppUpdateStatus, locale: AppLocale) {
   }
 }
 
+function getHeaderTipText(update: AppUpdateStatus, locale: AppLocale, fallbackTip: string) {
+  const text = LOCALE_TEXT[locale];
+  if (update.status === 'downloaded') {
+    return text.updateTipDownloaded;
+  }
+  if (update.status === 'available') {
+    return text.updateTipAvailable;
+  }
+  return fallbackTip;
+}
+
 function makeGroupId() {
   return `custom-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
@@ -833,6 +862,7 @@ export function TerminalPage() {
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>(loadHistory);
   const [commandConfigJson, setCommandConfigJson] = useState('');
   const [commandConfigMessage, setCommandConfigMessage] = useState('');
+  const [tipIndex, setTipIndex] = useState(0);
   const [commandManagerMode, setCommandManagerMode] = useState<'form' | 'json'>('form');
   const [mkdirDialogOpen, setMkdirDialogOpen] = useState(false);
   const [mkdirFolderName, setMkdirFolderName] = useState('');
@@ -880,7 +910,13 @@ export function TerminalPage() {
 
   const text = LOCALE_TEXT[settings.locale];
   const status = activeSession?.status ?? 'starting';
-  const cwd = activeSession?.cwd ?? '';
+  const terminalTips = text.terminalTips;
+  const hasUpdateTip = appUpdate.status === 'available' || appUpdate.status === 'downloaded';
+  const headerTipText = getHeaderTipText(
+    appUpdate,
+    settings.locale,
+    terminalTips[tipIndex % terminalTips.length] ?? '',
+  );
   const shouldShowSidebar =
     settings.showSidebar && (!settings.hideSidebarWhenSingleSession || sessions.length > 1);
 
@@ -913,6 +949,18 @@ export function TerminalPage() {
     const frame = window.requestAnimationFrame(fit);
     return () => window.cancelAnimationFrame(frame);
   }, [fit]);
+
+  useEffect(() => {
+    if (hasUpdateTip || terminalTips.length <= 1) {
+      return;
+    }
+
+    const timerId = window.setInterval(() => {
+      setTipIndex((current) => (current + 1) % terminalTips.length);
+    }, 60_000);
+
+    return () => window.clearInterval(timerId);
+  }, [hasUpdateTip, terminalTips.length]);
 
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -1227,6 +1275,17 @@ export function TerminalPage() {
     });
   };
 
+  const handleHeaderTipClick = () => {
+    if (hasUpdateTip) {
+      setSettingsOpen(true);
+      return;
+    }
+
+    if (terminalTips.length > 1) {
+      setTipIndex((current) => (current + 1) % terminalTips.length);
+    }
+  };
+
   const updateBuiltInMenu = (key: BuiltInMenuKey, updater: (current: CommandMenuConfig) => CommandMenuConfig) => {
     setSettings((current) => ({
       ...current,
@@ -1399,10 +1458,25 @@ export function TerminalPage() {
           <Box className="terminal-mark">
             <TerminalIcon fontSize="small" />
           </Box>
-          <Stack direction="row" alignItems="center" spacing={0.75} minWidth={0}>
-            <FolderOutlinedIcon className="terminal-path-icon" fontSize="inherit" />
-            <Typography className="terminal-path" variant="body2" noWrap>
-              {cwd || text.powerShellStarting}
+          <Stack
+            className={`terminal-tip${hasUpdateTip ? ' is-update' : ''}`}
+            direction="row"
+            alignItems="center"
+            spacing={0.75}
+            minWidth={0}
+            role="button"
+            tabIndex={0}
+            onClick={handleHeaderTipClick}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleHeaderTipClick();
+              }
+            }}
+          >
+            <LightbulbOutlinedIcon className="terminal-tip-icon" fontSize="inherit" />
+            <Typography className="terminal-tip-text" variant="body2" noWrap>
+              {headerTipText}
             </Typography>
           </Stack>
         </Stack>

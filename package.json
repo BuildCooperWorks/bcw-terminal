@@ -1,6 +1,6 @@
 {
   "name": "bcw-terminal",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "BcwTerminal - a local developer command dashboard for Windows.",
   "main": "dist/main/main.js",
@@ -79,14 +79,14 @@
     "@types/node": "^20.12.12",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "png-to-ico": "^3.0.1",
     "typescript": "^5.4.5",
-    "vite": "^6.4.2",
+    "vite": "^8.0.10",
     "wait-on": "^7.2.0"
   }
 }

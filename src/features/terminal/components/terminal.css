@@ -46,12 +46,27 @@ body {
   background: rgba(119, 212, 196, 0.08);
 }
 
-.terminal-path-icon {
+.terminal-tip-icon {
   flex: 0 0 auto;
   color: #f0b86b;
 }
 
-.terminal-path {
+.terminal-tip {
+  max-width: min(64vw, 760px);
+  cursor: pointer;
+}
+
+.terminal-tip:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgba(119, 212, 196, 0.55);
+  outline-offset: 4px;
+}
+
+.terminal-tip.is-update .terminal-tip-icon {
+  color: #77d4c4;
+}
+
+.terminal-tip-text {
   max-width: min(64vw, 760px);
   color: var(--bcw-ui-text);
 }
