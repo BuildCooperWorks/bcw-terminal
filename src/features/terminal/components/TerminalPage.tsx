@@ -601,7 +601,6 @@ function loadHistory(): CommandHistoryItem[] {
       .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
       .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
       .replace(/\x1B[@-_]/g, '')
-      .replace(/[\uFFFD]/g, '')
       .replace(/[\x00-\x1F\x7F]/g, '')
       .trim();
 
@@ -618,10 +617,14 @@ function loadHistory(): CommandHistoryItem[] {
 
     return parsed
       .slice(0, 200)
-      .map((item) => ({
-        ...item,
-        command: sanitizeHistoryCommand(item.command ?? ''),
-      }))
+      .map((item) => {
+        const original = String(item.command ?? '').trim();
+        const sanitized = sanitizeHistoryCommand(original);
+        return {
+          ...item,
+          command: sanitized || original,
+        };
+      })
       .filter((item) => item.command.length > 0);
   } catch {
     return [];
@@ -1141,7 +1144,17 @@ export function TerminalPage() {
       return;
     }
 
+    const pastedCommands = clipboardText
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
     window.bcwTerminal.sendData(activeSessionId, clipboardText);
+    for (const command of pastedCommands) {
+      appendCommandHistory(command, activeSessionId);
+    }
     setEditMenuAnchor(null);
     window.requestAnimationFrame(() => {
       focusTerminal();
