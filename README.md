@@ -193,7 +193,7 @@ scripts/                    # ビルドヘルパー（アイコン生成 / Elect
 
 ## ライセンス
 
-未設定。
+MIT License.
 
 ## Windows 注意事項 (Smart App Control)
 

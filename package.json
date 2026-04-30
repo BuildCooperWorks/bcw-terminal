@@ -2,6 +2,7 @@
   "name": "bcw-terminal",
   "version": "0.1.12",
   "private": true,
+  "license": "MIT",
   "description": "BcwTerminal - a local developer command dashboard for Windows.",
   "main": "dist/main/main.js",
   "scripts": {
