@@ -31,6 +31,14 @@ function stripAnsi(value: string) {
   return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }
 
+function stripControlSequences(value: string) {
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-_]/g, '')
+    .replace(/[\x00-\x08\x0B-\x1F\x7F]/g, '');
+}
+
 function getTerminalTheme(settings: TerminalSettings) {
   return {
     background: settings.terminalBackgroundColor,
@@ -123,7 +131,7 @@ function commandFromInput(input: string) {
 
   return lines
     .slice(0, -1)
-    .map((line) => line.trim())
+    .map((line) => stripControlSequences(line).trim())
     .filter(Boolean)
     .at(-1);
 }

@@ -596,6 +596,15 @@ function loadSettings(): PageSettings {
 }
 
 function loadHistory(): CommandHistoryItem[] {
+  const sanitizeHistoryCommand = (value: string) =>
+    value
+      .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+      .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/\x1B[@-_]/g, '')
+      .replace(/[\uFFFD]/g, '')
+      .replace(/[\x00-\x1F\x7F]/g, '')
+      .trim();
+
   try {
     const saved = window.localStorage.getItem(HISTORY_STORAGE_KEY);
     if (!saved) {
@@ -607,7 +616,13 @@ function loadHistory(): CommandHistoryItem[] {
       return [];
     }
 
-    return parsed.slice(0, 200);
+    return parsed
+      .slice(0, 200)
+      .map((item) => ({
+        ...item,
+        command: sanitizeHistoryCommand(item.command ?? ''),
+      }))
+      .filter((item) => item.command.length > 0);
   } catch {
     return [];
   }

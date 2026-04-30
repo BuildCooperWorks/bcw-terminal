@@ -30,6 +30,7 @@ Windows Terminal を完全に置き換えるのではなく、よく使う開発
 
 ## 必要環境
 
+- 対応OS: Windows のみ（macOS / Linux は未対応）
 - Windows 10 / 11
 - Node.js 20 系以上
 - npm 10 系以上
