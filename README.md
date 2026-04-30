@@ -3,6 +3,10 @@
 Windows 上で動く、自分専用の開発ターミナルダッシュボードです。
 Windows Terminal を完全に置き換えるのではなく、よく使うコマンドをワンクリックで叩けるよう拡張した PowerShell ラッパーです。
 
+## スクリーンショット
+
+![BcwTerminal screenshot](docs/images/bcw-terminal-screenshot.png)
+
 ## 主な機能
 
 - **PowerShell セッション管理**: 複数のターミナルを作成し、サイドバーから切り替えできます。
