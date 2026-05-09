@@ -226,7 +226,7 @@ const LOCALE_TEXT = {
       'Tip: Press Tab while typing a path or command to cycle completion candidates.',
       'Tip: Use Ctrl+C to interrupt a running command.',
       'Tip: Click a history item to run it again.',
-      'Tip: Select terminal text and right-click to copy it.',
+      'Tip: Right-click the terminal to paste. Select text first to copy it.',
       'Tip: Save the active terminal output from Edit.',
     ],
     updateTipAvailable: 'Update available. Open Settings to check and apply it.',
@@ -337,7 +337,7 @@ const LOCALE_TEXT = {
       'Tips: 入力途中で Tab キーを押すと、候補を補完できます。',
       'Tips: 実行中のコマンドは Ctrl+C で中断できます。',
       'Tips: 履歴の項目をクリックすると、もう一度実行できます。',
-      'Tips: ターミナルの選択範囲を右クリックするとコピーできます。',
+      'Tips: ターミナルを右クリックすると貼り付けできます。選択中はコピーします。',
       'Tips: 編集メニューからアクティブなターミナル内容を保存できます。',
     ],
     updateTipAvailable: 'バージョンアップがあります。設定から確認・適用できます。',
@@ -1185,23 +1185,11 @@ export function TerminalPage() {
     });
   };
 
-  const handleTerminalContextMenu = async (event: MouseEvent<HTMLDivElement>) => {
-    const selectedText = getSelectionText() || window.getSelection()?.toString() || '';
-    if (!selectedText.trim()) {
-      return;
-    }
-
-    event.preventDefault();
-    await window.bcwTerminal.writeClipboardText(selectedText);
-    clearSelection();
-    window.requestAnimationFrame(() => {
-      focusTerminal();
-    });
-  };
-
-  const handlePasteClipboard = async () => {
+  const pasteClipboardIntoActiveTerminal = async (closeEditMenu = false) => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
-      setEditMenuAnchor(null);
+      if (closeEditMenu) {
+        setEditMenuAnchor(null);
+      }
       window.requestAnimationFrame(() => {
         focusTerminal();
       });
@@ -1210,7 +1198,9 @@ export function TerminalPage() {
 
     const clipboardText = await window.bcwTerminal.readClipboardText();
     if (!clipboardText) {
-      setEditMenuAnchor(null);
+      if (closeEditMenu) {
+        setEditMenuAnchor(null);
+      }
       window.requestAnimationFrame(() => {
         focusTerminal();
       });
@@ -1228,10 +1218,32 @@ export function TerminalPage() {
     for (const command of pastedCommands) {
       appendCommandHistory(command, activeSessionId);
     }
-    setEditMenuAnchor(null);
+    if (closeEditMenu) {
+      setEditMenuAnchor(null);
+    }
     window.requestAnimationFrame(() => {
       focusTerminal();
     });
+  };
+
+  const handleTerminalContextMenu = async (event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const selectedText = getSelectionText() || window.getSelection()?.toString() || '';
+    if (selectedText.trim()) {
+      await window.bcwTerminal.writeClipboardText(selectedText);
+      clearSelection();
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
+      return;
+    }
+
+    await pasteClipboardIntoActiveTerminal();
+  };
+
+  const handlePasteClipboard = async () => {
+    await pasteClipboardIntoActiveTerminal(true);
   };
 
   const handleSaveTerminalOutput = async () => {
