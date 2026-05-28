@@ -1,9 +1,21 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AppUpdateState, TerminalCwdEvent, TerminalExitEvent, TerminalOutputEvent } from './types';
+import type {
+  AppUpdateState,
+  CommandVariableInput,
+  TerminalCwdEvent,
+  TerminalExitEvent,
+  TerminalOutputEvent,
+  TerminalSequenceStep,
+} from './types';
 
 const terminalApi = {
   checkForAppUpdate: () => ipcRenderer.invoke('app:update:check'),
   createSession: () => ipcRenderer.invoke('terminal:create-session'),
+  deleteCommandVariable: (id: string) => ipcRenderer.invoke('command-variables:delete', id),
+  executeCommand: (sessionId: string, command: string) =>
+    ipcRenderer.invoke('terminal:execute-command', { sessionId, command }),
+  runSequence: (sessionId: string, steps: TerminalSequenceStep[]) =>
+    ipcRenderer.invoke('terminal:run-sequence', { sessionId, steps }),
   getAppUpdateState: async () => {
     try {
       return await ipcRenderer.invoke('app:update:get-state');
@@ -26,9 +38,11 @@ const terminalApi = {
     }
   },
   loadCommandConfigFile: () => ipcRenderer.invoke('command-config:load-file'),
+  listCommandVariables: () => ipcRenderer.invoke('command-variables:list'),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   saveCommandConfigFile: (content: string, currentPath?: string) =>
     ipcRenderer.invoke('command-config:save-file', { content, currentPath }),
+  saveCommandVariable: (variable: CommandVariableInput) => ipcRenderer.invoke('command-variables:save', variable),
   saveTerminalOutputFile: (content: string) => ipcRenderer.invoke('terminal-output:save-file', { content }),
   setAlwaysOnTop: async (value: boolean) => {
     try {

@@ -435,10 +435,15 @@ export function useBcwTerminal(settings: TerminalSettings) {
     [createSession, selectSession],
   );
 
-  const sendCommand = useCallback((command: string) => {
+  const sendCommand = useCallback(async (command: string) => {
     const sessionId = activeIdRef.current;
     if (!sessionId) {
-      return;
+      return { executed: false, missingVariables: [] };
+    }
+
+    const result = await window.bcwTerminal.executeCommand(sessionId, command);
+    if (!result.executed) {
+      return result;
     }
 
     setSessions((current) =>
@@ -454,7 +459,7 @@ export function useBcwTerminal(settings: TerminalSettings) {
       ),
     );
     inputBuffersRef.current.set(sessionId, '');
-    window.bcwTerminal.sendData(sessionId, `${command}\r`);
+    return result;
   }, []);
 
   const getSelectionText = useCallback(() => {

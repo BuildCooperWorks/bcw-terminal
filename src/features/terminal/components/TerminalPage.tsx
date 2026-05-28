@@ -1,10 +1,8 @@
 ﻿import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import AddIcon from '@mui/icons-material/Add';
+import type { ReactNode } from 'react';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
-import BoltIcon from '@mui/icons-material/Bolt';
 import ChatIcon from '@mui/icons-material/Chat';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import CloseIcon from '@mui/icons-material/Close';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -14,8 +12,9 @@ import EditIcon from '@mui/icons-material/Edit';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import HistoryIcon from '@mui/icons-material/History';
+import KeyIcon from '@mui/icons-material/Key';
 import LanIcon from '@mui/icons-material/Lan';
-import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -25,7 +24,6 @@ import TuneIcon from '@mui/icons-material/Tune';
 import {
   Box,
   Button,
-  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -41,10 +39,13 @@ import {
   Slider,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
+import type { CommandVariableKind, CommandVariableSnapshot, TerminalSequenceStep } from '../../../preload/types';
 import { useBcwTerminal, type TerminalSessionView, type TerminalSettings } from '../hooks/useBcwTerminal';
 import './terminal.css';
 
@@ -80,6 +81,14 @@ type CustomCommandGroup = {
   items: CommandMenuItem[];
 };
 
+type OperationSequence = {
+  id: string;
+  title: string;
+  description: string;
+  visible: boolean;
+  steps: TerminalSequenceStep[];
+};
+
 type CommandHistoryItem = {
   command: string;
   createdAt: number;
@@ -105,6 +114,7 @@ type PageSettings = TerminalSettings & {
   locale: AppLocale;
   menuConfigs: CommandMenuConfigs;
   customCommandGroups: CustomCommandGroup[];
+  operationSequences: OperationSequence[];
   groupOrder: string[];
   commandConfigPath?: string;
   showSidebar: boolean;
@@ -143,6 +153,7 @@ const LOCALE_TEXT = {
     activityIdle: 'Idle',
     activityRunning: 'Running',
     activityStopped: 'Stopped',
+    automationManager: 'Variables / sequences',
     addItem: 'Add item',
     alwaysOnTop: 'Always on top',
     clearButton: 'Clear',
@@ -197,6 +208,20 @@ const LOCALE_TEXT = {
     newGroup: 'New custom group',
     newGroupTooltip: 'Create a new editable custom command group.',
     noHistory: 'No command history yet.',
+    sequenceAddStep: 'Add step',
+    sequenceDelayMs: 'Delay after send (ms)',
+    sequenceDescription: 'Description',
+    sequenceInput: 'Input',
+    sequenceManager: 'Sequence manager',
+    sequenceManagerDescription: 'Register interactive terminal flows such as WSL login, SSH, and password input.',
+    sequenceMenu: 'Sequences',
+    sequenceNew: 'New sequence',
+    sequenceNoItems: 'No sequences yet.',
+    sequenceRunError: 'Sequence failed.',
+    sequenceRunStarted: 'Sequence started.',
+    sequenceStepWaitFor: 'Wait for text before send',
+    sequenceSubmit: 'Press Enter after send',
+    sequenceTitle: 'Sequence name',
     pasteClipboard: 'Paste clipboard',
     saveTerminalOutput: 'Save terminal output',
     saveTerminalOutputDescription: 'Save the active terminal content as a text file.',
@@ -207,6 +232,24 @@ const LOCALE_TEXT = {
     resetSettingsTooltip:
       'Reset all settings to defaults: language, fonts, terminal colors, sidebar options, button visibility, and command groups.',
     runAgain: 'Run',
+    variableDeleteTooltip: 'Delete this variable.',
+    variableDescription: 'Description',
+    variableEnabled: 'Enabled',
+    variableKind: 'Type',
+    variableKindSecret: 'Secret',
+    variableKindText: 'Text',
+    variableManager: 'Variable manager',
+    variableManagerDescription: 'Create values that can be referenced from command buttons with {{VARIABLE_NAME}}.',
+    variableMissing: 'Variable is not registered:',
+    variableName: 'Variable name',
+    variableNew: 'New variable',
+    variableReference: 'Reference',
+    variableSaved: 'Variable saved.',
+    variableSecretPlaceholder: 'Leave blank to keep the saved secret.',
+    variableTestInTerminal: 'Test in terminal',
+    variableTestSecretTooltip: 'Secret variables are not printed to the terminal.',
+    variableValue: 'Value',
+    variablesEmpty: 'No variables yet.',
     sendCtrlC: 'Send Ctrl+C',
     smartAppControlEvalWarning:
       'Smart App Control is in evaluation mode. Command launch can be restricted depending on policy.',
@@ -222,23 +265,11 @@ const LOCALE_TEXT = {
     stopSessionTooltip: 'Stop this session.',
     terminalBackgroundColor: 'Terminal background color',
     terminalTextColor: 'Terminal text color',
-    terminalTips: [
-      'Tip: Press Tab while typing a path or command to cycle completion candidates.',
-      'Tip: Use Ctrl+C to interrupt a running command.',
-      'Tip: Click a history item to run it again.',
-      'Tip: Right-click the terminal to paste. Select text first to copy it.',
-      'Tip: Save the active terminal output from Edit.',
-    ],
-    updateTipAvailable: 'Update available. Open Settings to check and apply it.',
-    updateTipDownloaded: 'Update downloaded. Open Settings to apply it.',
     addItemTooltip: 'Add a new command item to the selected group.',
     showSessionSidebar: 'Show session sidebar',
     sidebarAutoHidden: 'Sidebar hidden in single-session mode',
     sidebarCollapse: 'Collapse sidebar',
     sidebarExpand: 'Expand sidebar',
-    statusReady: 'Ready',
-    statusStarting: 'Starting',
-    statusStopped: 'Stopped',
     updateStatusAvailable: 'Update available',
     updateStatusChecking: 'Checking for update...',
     updateStatusDownloaded: 'Update downloaded. Restart to apply.',
@@ -254,6 +285,7 @@ const LOCALE_TEXT = {
     activityIdle: '待機中',
     activityRunning: '実行中',
     activityStopped: '停止中',
+    automationManager: '変数 / 操作シーケンス',
     addItem: '項目を追加',
     alwaysOnTop: '最前面に固定',
     clearButton: 'クリア',
@@ -308,6 +340,20 @@ const LOCALE_TEXT = {
     newGroup: '新しいカスタムグループ',
     newGroupTooltip: '編集可能なカスタムコマンドグループを新規作成します。',
     noHistory: '履歴はまだありません。',
+    sequenceAddStep: 'ステップを追加',
+    sequenceDelayMs: '送信後の待機(ms)',
+    sequenceDescription: '説明',
+    sequenceInput: '送信する文字列',
+    sequenceManager: '操作シーケンス管理',
+    sequenceManagerDescription: 'WSL 起動、SSH、パスワード入力などの対話操作を手順として登録します。',
+    sequenceMenu: '操作シーケンス',
+    sequenceNew: '新しい操作シーケンス',
+    sequenceNoItems: '操作シーケンスはまだありません。',
+    sequenceRunError: '操作シーケンスの実行に失敗しました。',
+    sequenceRunStarted: '操作シーケンスを開始しました。',
+    sequenceStepWaitFor: '送信前に待つ文字列',
+    sequenceSubmit: '送信後に Enter',
+    sequenceTitle: 'シーケンス名',
     pasteClipboard: 'クリップボードを貼り付け',
     saveTerminalOutput: 'ターミナル出力を保存',
     saveTerminalOutputDescription: 'アクティブなターミナル内容をテキストファイルに保存します。',
@@ -318,6 +364,24 @@ const LOCALE_TEXT = {
     resetSettingsTooltip:
       '表示言語・フォント・ターミナル色設定・サイドバー設定・ボタン表示・コマンド設定を初期値に戻します。',
     runAgain: '再実行',
+    variableDeleteTooltip: 'この変数を削除します。',
+    variableDescription: '説明',
+    variableEnabled: '有効',
+    variableKind: '種別',
+    variableKindSecret: 'シークレット',
+    variableKindText: '通常テキスト',
+    variableManager: '変数管理',
+    variableManagerDescription: 'コマンドボタンから {{VARIABLE_NAME}} の形式で参照できる値を管理します。',
+    variableMissing: '変数が登録されていません:',
+    variableName: '変数名',
+    variableNew: '新しい変数',
+    variableReference: '参照名',
+    variableSaved: '変数を保存しました。',
+    variableSecretPlaceholder: '空欄のまま保存すると登録済みシークレットを維持します。',
+    variableTestInTerminal: 'ターミナルで確認',
+    variableTestSecretTooltip: 'シークレット変数はターミナルに表示しません。',
+    variableValue: '値',
+    variablesEmpty: '変数はまだありません。',
     sendCtrlC: 'Ctrl+C を送信',
     smartAppControlEvalWarning:
       'Smart App Control が評価モードです。ポリシーにより一部コマンド起動が制限される場合があります。',
@@ -333,23 +397,11 @@ const LOCALE_TEXT = {
     stopSessionTooltip: 'このセッションを停止します。',
     terminalBackgroundColor: 'ターミナル背景色',
     terminalTextColor: 'ターミナル文字色',
-    terminalTips: [
-      'Tips: 入力途中で Tab キーを押すと、候補を補完できます。',
-      'Tips: 実行中のコマンドは Ctrl+C で中断できます。',
-      'Tips: 履歴の項目をクリックすると、もう一度実行できます。',
-      'Tips: ターミナルを右クリックすると貼り付けできます。選択中はコピーします。',
-      'Tips: 編集メニューからアクティブなターミナル内容を保存できます。',
-    ],
-    updateTipAvailable: 'バージョンアップがあります。設定から確認・適用できます。',
-    updateTipDownloaded: '更新のダウンロードが完了しました。設定から適用できます。',
     addItemTooltip: '選択中グループにコマンド項目を追加します。',
     showSessionSidebar: 'セッションサイドバーを表示',
     sidebarAutoHidden: '単一セッションではサイドバーを自動非表示',
     sidebarCollapse: 'サイドバーを折りたたむ',
     sidebarExpand: 'サイドバーを展開',
-    statusReady: 'Ready',
-    statusStarting: '起動中',
-    statusStopped: '停止中',
     updateStatusAvailable: '更新があります',
     updateStatusChecking: '更新を確認中...',
     updateStatusDownloaded: '更新のダウンロードが完了しました。再起動して適用できます。',
@@ -366,7 +418,7 @@ const DEFAULT_COMMAND_BUTTON_VISIBILITY: CommandButtonVisibility = {
   chatgpt: false,
   git: false,
   ls: false,
-  dir: true,
+  dir: false,
   network: false,
   edit: true,
   history: true,
@@ -462,6 +514,7 @@ const DEFAULT_SETTINGS: PageSettings = {
   commandVisibility: { ...DEFAULT_COMMAND_BUTTON_VISIBILITY },
   menuConfigs: { ...DEFAULT_MENU_CONFIGS },
   customCommandGroups: [],
+  operationSequences: [],
   groupOrder: [...BUILT_IN_MENU_ORDER],
   alwaysOnTop: false,
 };
@@ -476,6 +529,7 @@ function createDefaultSettings(): PageSettings {
     commandVisibility: { ...DEFAULT_COMMAND_BUTTON_VISIBILITY },
     menuConfigs,
     customCommandGroups: [],
+    operationSequences: [],
     groupOrder: [...BUILT_IN_MENU_ORDER],
   };
 }
@@ -552,6 +606,21 @@ function dedupeMenuItems(items: CommandMenuItem[]) {
   return deduped;
 }
 
+function normalizeSequenceSteps(value: unknown): TerminalSequenceStep[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((step): step is Partial<TerminalSequenceStep> => Boolean(step) && typeof step === 'object')
+    .map((step) => ({
+      input: typeof step.input === 'string' ? step.input : '',
+      submit: step.submit !== false,
+      waitFor: typeof step.waitFor === 'string' ? step.waitFor : '',
+      delayMs: typeof step.delayMs === 'number' && Number.isFinite(step.delayMs) ? Math.max(0, step.delayMs) : 300,
+    }));
+}
+
 function loadSettings(): PageSettings {
   try {
     const saved = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -594,6 +663,18 @@ function loadSettings(): PageSettings {
           }))
       : [];
 
+    const operationSequences = Array.isArray(parsed.operationSequences)
+      ? parsed.operationSequences
+          .filter((sequence) => sequence && typeof sequence.id === 'string')
+          .map((sequence) => ({
+            id: sequence.id,
+            title: sequence.title || 'Sequence',
+            description: sequence.description || '',
+            visible: sequence.visible ?? true,
+            steps: normalizeSequenceSteps(sequence.steps),
+          }))
+      : [];
+
     const allGroupIds = new Set<string>([
       ...BUILT_IN_MENU_ORDER,
       ...customCommandGroups.map((group) => group.id),
@@ -615,6 +696,7 @@ function loadSettings(): PageSettings {
       },
       menuConfigs,
       customCommandGroups,
+      operationSequences,
       groupOrder,
       alwaysOnTop: Boolean(parsed.alwaysOnTop),
     };
@@ -764,37 +846,6 @@ function applyCommandConfigDocument(
   return next;
 }
 
-function getStatusLabel(status: TerminalSessionView['status'], locale: AppLocale) {
-  const text = LOCALE_TEXT[locale];
-  if (status === 'ready') {
-    return text.statusReady;
-  }
-  if (status === 'starting') {
-    return text.statusStarting;
-  }
-  return text.statusStopped;
-}
-
-function getStatusDescription(status: TerminalSessionView['status'], locale: AppLocale) {
-  if (locale === 'ja') {
-    if (status === 'ready') {
-      return 'PowerShell セッションはコマンド入力を受け付けています。';
-    }
-    if (status === 'starting') {
-      return 'PowerShell セッションを起動中です。';
-    }
-    return 'PowerShell セッションは停止中です。再起動で再開できます。';
-  }
-
-  if (status === 'ready') {
-    return 'PowerShell session is ready.';
-  }
-  if (status === 'starting') {
-    return 'Starting PowerShell session.';
-  }
-  return 'PowerShell session is stopped.';
-}
-
 function getAppUpdateStatusText(update: AppUpdateStatus, locale: AppLocale) {
   const text = LOCALE_TEXT[locale];
   switch (update.status) {
@@ -822,19 +873,48 @@ function getAppUpdateStatusText(update: AppUpdateStatus, locale: AppLocale) {
   }
 }
 
-function getHeaderTipText(update: AppUpdateStatus, locale: AppLocale, fallbackTip: string) {
-  const text = LOCALE_TEXT[locale];
-  if (update.status === 'downloaded') {
-    return text.updateTipDownloaded;
-  }
-  if (update.status === 'available') {
-    return text.updateTipAvailable;
-  }
-  return fallbackTip;
-}
-
 function makeGroupId() {
   return `custom-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function makeSequenceId() {
+  return `sequence-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+type CommandVariableForm = {
+  id?: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  kind: CommandVariableKind;
+  value: string;
+};
+
+const EMPTY_VARIABLE_FORM: CommandVariableForm = {
+  name: '',
+  description: '',
+  enabled: true,
+  kind: 'text',
+  value: '',
+};
+
+type AutomationManagerTab = 'variables' | 'sequences';
+
+function toVariableReference(name: string) {
+  return `{{${name}}}`;
+}
+
+function createVariableTestCommand(name: string) {
+  return `Write-Output "${name} = {{${name}}}"`;
+}
+
+function createEmptySequenceStep(): TerminalSequenceStep {
+  return {
+    input: '',
+    submit: true,
+    waitFor: '',
+    delayMs: 300,
+  };
 }
 
 export function TerminalPage() {
@@ -844,6 +924,8 @@ export function TerminalPage() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandManagerOpen, setCommandManagerOpen] = useState(false);
+  const [automationManagerOpen, setAutomationManagerOpen] = useState(false);
+  const [automationManagerTab, setAutomationManagerTab] = useState<AutomationManagerTab>('variables');
 
   const [aiMenuAnchor, setAiMenuAnchor] = useState<HTMLElement | null>(null);
   const [activeAiMenu, setActiveAiMenu] = useState<'claude' | 'chatgpt' | null>(null);
@@ -853,6 +935,7 @@ export function TerminalPage() {
   const [networkMenuAnchor, setNetworkMenuAnchor] = useState<HTMLElement | null>(null);
   const [editMenuAnchor, setEditMenuAnchor] = useState<HTMLElement | null>(null);
   const [historyMenuAnchor, setHistoryMenuAnchor] = useState<HTMLElement | null>(null);
+  const [sequenceMenuAnchor, setSequenceMenuAnchor] = useState<HTMLElement | null>(null);
   const [customMenuAnchor, setCustomMenuAnchor] = useState<HTMLElement | null>(null);
   const [customMenuTargetId, setCustomMenuTargetId] = useState<string | null>(null);
 
@@ -862,10 +945,14 @@ export function TerminalPage() {
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>(loadHistory);
   const [commandConfigJson, setCommandConfigJson] = useState('');
   const [commandConfigMessage, setCommandConfigMessage] = useState('');
-  const [tipIndex, setTipIndex] = useState(0);
   const [commandManagerMode, setCommandManagerMode] = useState<'form' | 'json'>('form');
   const [mkdirDialogOpen, setMkdirDialogOpen] = useState(false);
   const [mkdirFolderName, setMkdirFolderName] = useState('');
+  const [commandVariables, setCommandVariables] = useState<CommandVariableSnapshot[]>([]);
+  const [variableForm, setVariableForm] = useState<CommandVariableForm>(EMPTY_VARIABLE_FORM);
+  const [variableMessage, setVariableMessage] = useState('');
+  const [sequenceTargetId, setSequenceTargetId] = useState('');
+  const [sequenceMessage, setSequenceMessage] = useState('');
 
   const [managerTargetKey, setManagerTargetKey] = useState<string>('claude');
   const [newItemLabel, setNewItemLabel] = useState('');
@@ -909,14 +996,6 @@ export function TerminalPage() {
     useBcwTerminal(terminalSettings);
 
   const text = LOCALE_TEXT[settings.locale];
-  const status = activeSession?.status ?? 'starting';
-  const terminalTips = text.terminalTips;
-  const hasUpdateTip = appUpdate.status === 'available' || appUpdate.status === 'downloaded';
-  const headerTipText = getHeaderTipText(
-    appUpdate,
-    settings.locale,
-    terminalTips[tipIndex % terminalTips.length] ?? '',
-  );
   const shouldShowSidebar =
     settings.showSidebar && (!settings.hideSidebarWhenSingleSession || sessions.length > 1);
 
@@ -940,6 +1019,14 @@ export function TerminalPage() {
   }, [managerTargetKey, settings.customCommandGroups, settings.groupOrder]);
 
   useEffect(() => {
+    if (sequenceTargetId && settings.operationSequences.some((sequence) => sequence.id === sequenceTargetId)) {
+      return;
+    }
+
+    setSequenceTargetId(settings.operationSequences[0]?.id ?? '');
+  }, [sequenceTargetId, settings.operationSequences]);
+
+  useEffect(() => {
     if (hostRef.current) {
       attachTerminal(hostRef.current);
     }
@@ -949,18 +1036,6 @@ export function TerminalPage() {
     const frame = window.requestAnimationFrame(fit);
     return () => window.cancelAnimationFrame(frame);
   }, [fit]);
-
-  useEffect(() => {
-    if (hasUpdateTip || terminalTips.length <= 1) {
-      return;
-    }
-
-    const timerId = window.setInterval(() => {
-      setTipIndex((current) => (current + 1) % terminalTips.length);
-    }, 60_000);
-
-    return () => window.clearInterval(timerId);
-  }, [hasUpdateTip, terminalTips.length]);
 
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -973,6 +1048,19 @@ export function TerminalPage() {
   useEffect(() => {
     void window.bcwTerminal.setLocale(settings.locale);
   }, [settings.locale]);
+
+  const refreshCommandVariables = () => {
+    void window.bcwTerminal
+      .listCommandVariables()
+      .then((variables) => setCommandVariables(variables))
+      .catch((error: unknown) => {
+        setVariableMessage(error instanceof Error ? error.message : String(error));
+      });
+  };
+
+  useEffect(() => {
+    refreshCommandVariables();
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1059,6 +1147,11 @@ export function TerminalPage() {
     });
   };
 
+  const openAutomationManager = (tab: AutomationManagerTab) => {
+    setAutomationManagerTab(tab);
+    setAutomationManagerOpen(true);
+  };
+
   useEffect(() => {
     for (const session of sessions) {
       const previous = previousSessionCommandsRef.current[session.id] ?? '';
@@ -1096,7 +1189,7 @@ export function TerminalPage() {
     return normalizeCommandForExecution(command);
   };
 
-  const runCommand = (command: string) => {
+  const runCommand = async (command: string) => {
     if (!activeSessionId) {
       return;
     }
@@ -1106,7 +1199,15 @@ export function TerminalPage() {
       return;
     }
 
-    sendCommand(resolvedCommand);
+    const result = await sendCommand(resolvedCommand);
+    if (!result.executed) {
+      if (result.missingVariables.length > 0) {
+        setVariableMessage(`${text.variableMissing} ${result.missingVariables.join(', ')}`);
+        openAutomationManager('variables');
+      }
+      return;
+    }
+
     appendCommandHistory(resolvedCommand, activeSessionId);
     window.requestAnimationFrame(() => {
       focusTerminal();
@@ -1126,13 +1227,181 @@ export function TerminalPage() {
 
     const escaped = normalized.replace(/"/g, '`"');
     const resolvedCommand = `mkdir "${escaped}"`;
-    sendCommand(resolvedCommand);
+    void sendCommand(resolvedCommand);
     appendCommandHistory(resolvedCommand, activeSessionId);
     setMkdirDialogOpen(false);
     setMkdirFolderName('');
     window.requestAnimationFrame(() => {
       focusTerminal();
     });
+  };
+
+  const resetVariableForm = () => {
+    setVariableForm({ ...EMPTY_VARIABLE_FORM });
+    setVariableMessage('');
+  };
+
+  const editCommandVariable = (variable: CommandVariableSnapshot) => {
+    setVariableForm({
+      id: variable.id,
+      name: variable.name,
+      description: variable.description,
+      enabled: variable.enabled,
+      kind: variable.kind,
+      value: variable.kind === 'text' ? (variable.value ?? '') : '',
+    });
+    setVariableMessage('');
+  };
+
+  const handleSaveCommandVariable = async () => {
+    try {
+      const saved = await window.bcwTerminal.saveCommandVariable(variableForm);
+      setCommandVariables((current) => {
+        const exists = current.some((variable) => variable.id === saved.id);
+        const next = exists
+          ? current.map((variable) => (variable.id === saved.id ? saved : variable))
+          : [...current, saved];
+        return next.sort((left, right) => left.name.localeCompare(right.name));
+      });
+      setVariableForm({
+        id: saved.id,
+        name: saved.name,
+        description: saved.description,
+        enabled: saved.enabled,
+        kind: saved.kind,
+        value: saved.kind === 'text' ? (saved.value ?? '') : '',
+      });
+      setVariableMessage(text.variableSaved);
+    } catch (error) {
+      setVariableMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleDeleteCommandVariable = async (id: string) => {
+    try {
+      await window.bcwTerminal.deleteCommandVariable(id);
+      setCommandVariables((current) => current.filter((variable) => variable.id !== id));
+      if (variableForm.id === id) {
+        resetVariableForm();
+      }
+    } catch (error) {
+      setVariableMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleTestCommandVariable = (variable: CommandVariableSnapshot) => {
+    if (variable.kind === 'secret') {
+      setVariableMessage(text.variableTestSecretTooltip);
+      return;
+    }
+
+    void runCommand(createVariableTestCommand(variable.name));
+    setAutomationManagerOpen(false);
+  };
+
+  const updateOperationSequence = (id: string, updater: (current: OperationSequence) => OperationSequence) => {
+    setSettings((current) => ({
+      ...current,
+      operationSequences: current.operationSequences.map((sequence) =>
+        sequence.id === id ? updater(sequence) : sequence,
+      ),
+    }));
+  };
+
+  const handleCreateOperationSequence = () => {
+    const id = makeSequenceId();
+    const next: OperationSequence = {
+      id,
+      title: 'WSL SSH',
+      description: 'wsl -> ssh -> password',
+      visible: true,
+      steps: [
+        { input: 'wsl', submit: true, waitFor: '', delayMs: 800 },
+        { input: 'ssh -l USER HOST', submit: true, waitFor: '', delayMs: 300 },
+        { input: '{{PASSWORD}}', submit: true, waitFor: 'password:', delayMs: 0 },
+      ],
+    };
+
+    setSettings((current) => ({
+      ...current,
+      operationSequences: [...current.operationSequences, next],
+    }));
+    setSequenceTargetId(id);
+    setSequenceMessage('');
+  };
+
+  const handleDeleteOperationSequence = () => {
+    if (!sequenceTargetId) {
+      return;
+    }
+
+    setSettings((current) => ({
+      ...current,
+      operationSequences: current.operationSequences.filter((sequence) => sequence.id !== sequenceTargetId),
+    }));
+    setSequenceMessage('');
+  };
+
+  const handleAddSequenceStep = () => {
+    if (!sequenceTargetId) {
+      return;
+    }
+
+    updateOperationSequence(sequenceTargetId, (current) => ({
+      ...current,
+      steps: [...current.steps, createEmptySequenceStep()],
+    }));
+  };
+
+  const handleRemoveSequenceStep = (index: number) => {
+    if (!sequenceTargetId) {
+      return;
+    }
+
+    updateOperationSequence(sequenceTargetId, (current) => ({
+      ...current,
+      steps: current.steps.filter((_, stepIndex) => stepIndex !== index),
+    }));
+  };
+
+  const updateSequenceStep = (
+    index: number,
+    updater: (current: TerminalSequenceStep) => TerminalSequenceStep,
+  ) => {
+    if (!sequenceTargetId) {
+      return;
+    }
+
+    updateOperationSequence(sequenceTargetId, (current) => ({
+      ...current,
+      steps: current.steps.map((step, stepIndex) => (stepIndex === index ? updater(step) : step)),
+    }));
+  };
+
+  const runOperationSequence = async (sequence: OperationSequence) => {
+    if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
+      return;
+    }
+
+    const result = await window.bcwTerminal.runSequence(activeSessionId, sequence.steps);
+    if (result.executed) {
+      setSequenceMessage(text.sequenceRunStarted);
+      setSequenceMenuAnchor(null);
+      setAutomationManagerOpen(false);
+      window.requestAnimationFrame(() => {
+        focusTerminal();
+      });
+      return;
+    }
+
+    if (result.missingVariables.length > 0) {
+      setVariableMessage(`${text.variableMissing} ${result.missingVariables.join(', ')}`);
+      openAutomationManager('variables');
+      return;
+    }
+
+    setSequenceMessage(result.error || text.sequenceRunError);
+    openAutomationManager('sequences');
   };
 
   const handleCheckForAppUpdate = async () => {
@@ -1287,17 +1556,6 @@ export function TerminalPage() {
     });
   };
 
-  const handleHeaderTipClick = () => {
-    if (hasUpdateTip) {
-      setSettingsOpen(true);
-      return;
-    }
-
-    if (terminalTips.length > 1) {
-      setTipIndex((current) => (current + 1) % terminalTips.length);
-    }
-  };
-
   const updateBuiltInMenu = (key: BuiltInMenuKey, updater: (current: CommandMenuConfig) => CommandMenuConfig) => {
     setSettings((current) => ({
       ...current,
@@ -1336,6 +1594,9 @@ export function TerminalPage() {
   const managerGroupConfig = selectedBuiltInKey
     ? settings.menuConfigs[selectedBuiltInKey]
     : selectedCustomGroup;
+  const selectedOperationSequence =
+    settings.operationSequences.find((sequence) => sequence.id === sequenceTargetId) ?? null;
+  const visibleOperationSequences = settings.operationSequences.filter((sequence) => sequence.visible);
 
   const addManagerItem = () => {
     const command = newItemCommand.trim();
@@ -1454,6 +1715,46 @@ export function TerminalPage() {
   });
   const customMenuItems =
     settings.customCommandGroups.find((group) => group.id === customMenuTargetId)?.items ?? [];
+  const hasRightToolbarActions = isButtonVisible('edit') || isButtonVisible('history');
+  const shortcutDisabled = !activeSession || activeSession.status === 'stopped';
+  const renderShortcutButton = (
+    key: string,
+    title: string,
+    description: string,
+    icon: ReactNode,
+    onClick: (event: MouseEvent<HTMLButtonElement>) => void,
+  ) => (
+    <Tooltip key={key} title={description}>
+      <span>
+        <Button
+          className="terminal-shortcut-button"
+          disabled={shortcutDisabled}
+          endIcon={<ArrowDropDownIcon />}
+          size="small"
+          startIcon={icon}
+          variant="outlined"
+          onClick={onClick}
+        >
+          {title}
+        </Button>
+      </span>
+    </Tooltip>
+  );
+  const renderCommandMenuItems = (items: CommandMenuItem[], onClose: () => void) =>
+    items.map((item, index) => (
+      <MenuItem
+        key={`${item.command}-${index}`}
+        onClick={() => {
+          runCommand(item.command);
+          onClose();
+        }}
+      >
+        <ListItemIcon>
+          <PlayArrowIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
+      </MenuItem>
+    ));
 
   return (
     <Box
@@ -1465,208 +1766,85 @@ export function TerminalPage() {
         } as any
       }
     >
-      <Box component="header" className="terminal-header">
-        <Stack direction="row" alignItems="center" spacing={1.25} minWidth={0}>
-          <Box className="terminal-mark">
-            <TerminalIcon fontSize="small" />
-          </Box>
-          <Stack
-            className={`terminal-tip${hasUpdateTip ? ' is-update' : ''}`}
-            direction="row"
-            alignItems="center"
-            spacing={0.75}
-            minWidth={0}
-            role="button"
-            tabIndex={0}
-            onClick={handleHeaderTipClick}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                handleHeaderTipClick();
-              }
-            }}
-          >
-            <LightbulbOutlinedIcon className="terminal-tip-icon" fontSize="inherit" />
-            <Typography className="terminal-tip-text" variant="body2" noWrap>
-              {headerTipText}
-            </Typography>
-          </Stack>
-        </Stack>
-
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Tooltip title={getStatusDescription(status, settings.locale)}>
-            <Chip
-              className="terminal-status"
-              color={status === 'ready' ? 'primary' : 'default'}
-              icon={<BoltIcon />}
-              label={getStatusLabel(status, settings.locale)}
-              size="small"
-              variant="outlined"
-            />
-          </Tooltip>
-          <Tooltip title={text.createSessionTooltip}>
-            <IconButton aria-label="New PowerShell session" color="primary" onClick={createSession}>
-              <AddIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip
-            title={
-              shouldShowSidebar
-                ? text.sidebarCollapse
-                : settings.hideSidebarWhenSingleSession && sessions.length <= 1
-                  ? text.sidebarAutoHidden
-                  : text.sidebarExpand
-            }
-          >
-            <span>
-              <IconButton
-                aria-label="Toggle sessions sidebar"
-                color="primary"
-                disabled={settings.hideSidebarWhenSingleSession && sessions.length <= 1}
-                onClick={() => setSettings((current) => ({ ...current, showSidebar: !current.showSidebar }))}
-              >
-                {shouldShowSidebar ? <ChevronRightIcon /> : <ChevronLeftIcon />}
-              </IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title={text.commandManager}>
-            <IconButton aria-label="Open command manager" color="primary" onClick={() => setCommandManagerOpen(true)}>
-              <TuneIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={text.settings}>
-            <IconButton aria-label="Open settings" color="primary" onClick={() => setSettingsOpen(true)}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </Box>
-
       <Box className="terminal-shortcuts">
+        <Box className="terminal-mark terminal-toolbar-mark">
+          <TerminalIcon fontSize="small" />
+        </Box>
+        <Tooltip title={text.createSessionTooltip}>
+          <IconButton
+            aria-label="New PowerShell session"
+            className="terminal-toolbar-icon"
+            color="primary"
+            onClick={createSession}
+          >
+            <AddIcon />
+          </IconButton>
+        </Tooltip>
+
         {orderedShortcutGroupIds.map((groupId) => {
           if (groupId === 'claude') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.claude.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<SmartToyIcon />}
-                    variant="outlined"
-                    onClick={(event) => {
-                      setActiveAiMenu('claude');
-                      setAiMenuAnchor(event.currentTarget);
-                    }}
-                  >
-                    {settings.menuConfigs.claude.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.claude.title,
+              settings.menuConfigs.claude.description,
+              <SmartToyIcon />,
+              (event) => {
+                setActiveAiMenu('claude');
+                setAiMenuAnchor(event.currentTarget);
+              },
             );
           }
 
           if (groupId === 'chatgpt') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.chatgpt.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<ChatIcon />}
-                    variant="outlined"
-                    onClick={(event) => {
-                      setActiveAiMenu('chatgpt');
-                      setAiMenuAnchor(event.currentTarget);
-                    }}
-                  >
-                    {settings.menuConfigs.chatgpt.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.chatgpt.title,
+              settings.menuConfigs.chatgpt.description,
+              <ChatIcon />,
+              (event) => {
+                setActiveAiMenu('chatgpt');
+                setAiMenuAnchor(event.currentTarget);
+              },
             );
           }
 
           if (groupId === 'git') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.git.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<GitHubIcon />}
-                    variant="outlined"
-                    onClick={(event) => setGitMenuAnchor(event.currentTarget)}
-                  >
-                    {settings.menuConfigs.git.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.git.title,
+              settings.menuConfigs.git.description,
+              <GitHubIcon />,
+              (event) => setGitMenuAnchor(event.currentTarget),
             );
           }
 
           if (groupId === 'ls') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.ls.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<FormatListBulletedIcon />}
-                    variant="outlined"
-                    onClick={(event) => setListMenuAnchor(event.currentTarget)}
-                  >
-                    {settings.menuConfigs.ls.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.ls.title,
+              settings.menuConfigs.ls.description,
+              <FormatListBulletedIcon />,
+              (event) => setListMenuAnchor(event.currentTarget),
             );
           }
 
           if (groupId === 'dir') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.dir.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<FormatListBulletedIcon />}
-                    variant="outlined"
-                    onClick={(event) => setDirMenuAnchor(event.currentTarget)}
-                  >
-                    {settings.menuConfigs.dir.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.dir.title,
+              settings.menuConfigs.dir.description,
+              <FormatListBulletedIcon />,
+              (event) => setDirMenuAnchor(event.currentTarget),
             );
           }
 
           if (groupId === 'network') {
-            return (
-              <Tooltip key={groupId} title={settings.menuConfigs.network.description}>
-                <span>
-                  <Button
-                    className="terminal-shortcut-button"
-                    disabled={!activeSession || activeSession.status === 'stopped'}
-                    endIcon={<ArrowDropDownIcon />}
-                    size="small"
-                    startIcon={<LanIcon />}
-                    variant="outlined"
-                    onClick={(event) => setNetworkMenuAnchor(event.currentTarget)}
-                  >
-                    {settings.menuConfigs.network.title}
-                  </Button>
-                </span>
-              </Tooltip>
+            return renderShortcutButton(
+              groupId,
+              settings.menuConfigs.network.title,
+              settings.menuConfigs.network.description,
+              <LanIcon />,
+              (event) => setNetworkMenuAnchor(event.currentTarget),
             );
           }
 
@@ -1675,25 +1853,15 @@ export function TerminalPage() {
             return null;
           }
 
-          return (
-            <Tooltip key={customGroup.id} title={customGroup.description || text.customGroup}>
-              <span>
-                <Button
-                  className="terminal-shortcut-button"
-                  disabled={!activeSession || activeSession.status === 'stopped'}
-                  endIcon={<ArrowDropDownIcon />}
-                  size="small"
-                  startIcon={<TerminalIcon />}
-                  variant="outlined"
-                  onClick={(event) => {
-                    setCustomMenuTargetId(customGroup.id);
-                    setCustomMenuAnchor(event.currentTarget);
-                  }}
-                >
-                  {customGroup.title}
-                </Button>
-              </span>
-            </Tooltip>
+          return renderShortcutButton(
+            customGroup.id,
+            customGroup.title,
+            customGroup.description || text.customGroup,
+            <TerminalIcon />,
+            (event) => {
+              setCustomMenuTargetId(customGroup.id);
+              setCustomMenuAnchor(event.currentTarget);
+            },
           );
         })}
 
@@ -1705,89 +1873,26 @@ export function TerminalPage() {
             setActiveAiMenu(null);
           }}
         >
-          {(activeAiMenu ? settings.menuConfigs[activeAiMenu].items : []).map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setAiMenuAnchor(null);
-                setActiveAiMenu(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(activeAiMenu ? settings.menuConfigs[activeAiMenu].items : [], () => {
+            setAiMenuAnchor(null);
+            setActiveAiMenu(null);
+          })}
         </Menu>
 
         <Menu anchorEl={gitMenuAnchor} open={Boolean(gitMenuAnchor)} onClose={() => setGitMenuAnchor(null)}>
-          {settings.menuConfigs.git.items.map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setGitMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(settings.menuConfigs.git.items, () => setGitMenuAnchor(null))}
         </Menu>
 
         <Menu anchorEl={listMenuAnchor} open={Boolean(listMenuAnchor)} onClose={() => setListMenuAnchor(null)}>
-          {settings.menuConfigs.ls.items.map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setListMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(settings.menuConfigs.ls.items, () => setListMenuAnchor(null))}
         </Menu>
 
         <Menu anchorEl={dirMenuAnchor} open={Boolean(dirMenuAnchor)} onClose={() => setDirMenuAnchor(null)}>
-          {settings.menuConfigs.dir.items.map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setDirMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(settings.menuConfigs.dir.items, () => setDirMenuAnchor(null))}
         </Menu>
 
         <Menu anchorEl={networkMenuAnchor} open={Boolean(networkMenuAnchor)} onClose={() => setNetworkMenuAnchor(null)}>
-          {settings.menuConfigs.network.items.map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setNetworkMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(settings.menuConfigs.network.items, () => setNetworkMenuAnchor(null))}
         </Menu>
 
         <Menu
@@ -1798,22 +1903,63 @@ export function TerminalPage() {
             setCustomMenuTargetId(null);
           }}
         >
-          {customMenuItems.map((item, index) => (
-            <MenuItem
-              key={`${item.command}-${index}`}
-              onClick={() => {
-                runCommand(item.command);
-                setCustomMenuAnchor(null);
-                setCustomMenuTargetId(null);
-              }}
-            >
-              <ListItemIcon>
-                <PlayArrowIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText primary={item.label} secondary={`${item.command} - ${item.description}`} />
-            </MenuItem>
-          ))}
+          {renderCommandMenuItems(customMenuItems, () => {
+            setCustomMenuAnchor(null);
+            setCustomMenuTargetId(null);
+          })}
         </Menu>
+
+        {visibleOperationSequences.length > 0 ? (
+          <>
+            <Tooltip title={text.sequenceManagerDescription}>
+              <span>
+                <Button
+                  className="terminal-shortcut-button"
+                  disabled={!activeSession || activeSession.status === 'stopped'}
+                  endIcon={<ArrowDropDownIcon />}
+                  size="small"
+                  startIcon={<PlaylistPlayIcon />}
+                  variant="outlined"
+                  onClick={(event) => setSequenceMenuAnchor(event.currentTarget)}
+                >
+                  {text.sequenceMenu}
+                </Button>
+              </span>
+            </Tooltip>
+            <Menu
+              anchorEl={sequenceMenuAnchor}
+              open={Boolean(sequenceMenuAnchor)}
+              onClose={() => setSequenceMenuAnchor(null)}
+            >
+              {visibleOperationSequences.map((sequence) => (
+                <MenuItem
+                  key={sequence.id}
+                  onClick={() => {
+                    void runOperationSequence(sequence);
+                    setSequenceMenuAnchor(null);
+                  }}
+                >
+                  <ListItemIcon>
+                    <PlaylistPlayIcon fontSize="small" />
+                  </ListItemIcon>
+                  <ListItemText primary={sequence.title} secondary={sequence.description} />
+                </MenuItem>
+              ))}
+              <Divider />
+              <MenuItem
+                onClick={() => {
+                  setSequenceMenuAnchor(null);
+                  openAutomationManager('sequences');
+                }}
+              >
+                <ListItemIcon>
+                  <TuneIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText primary={text.sequenceManager} secondary={text.sequenceManagerDescription} />
+              </MenuItem>
+            </Menu>
+          </>
+        ) : null}
 
         {isButtonVisible('edit') ? (
           <>
@@ -1928,6 +2074,16 @@ export function TerminalPage() {
             </Menu>
           </>
         ) : null}
+        <Tooltip title={text.settings}>
+          <IconButton
+            aria-label="Open settings"
+            className={`terminal-toolbar-icon terminal-toolbar-settings${hasRightToolbarActions ? '' : ' terminal-shortcut-system-start'}`}
+            color="primary"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SettingsIcon />
+          </IconButton>
+        </Tooltip>
       </Box>
 
       <Box className={`terminal-workspace${shouldShowSidebar ? '' : ' is-sidebar-hidden'}`}>
@@ -2067,6 +2223,76 @@ export function TerminalPage() {
               </TextField>
             </Box>
 
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.alwaysOnTop}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setSettings((current) => ({ ...current, alwaysOnTop: checked }));
+                    void window.bcwTerminal.setAlwaysOnTop(checked);
+                  }}
+                />
+              }
+              label={text.alwaysOnTop}
+            />
+
+            <Divider />
+
+            <Tooltip title={`${text.variableManagerDescription} ${text.sequenceManagerDescription}`}>
+              <span>
+                <Button variant="outlined" startIcon={<KeyIcon />} onClick={() => openAutomationManager('variables')}>
+                  {text.automationManager}
+                </Button>
+              </span>
+            </Tooltip>
+            <Typography className="terminal-settings-description">
+              {text.variableManagerDescription} {text.sequenceManagerDescription}
+            </Typography>
+
+            <Tooltip title={text.openCommandManagerTooltip}>
+              <span>
+                <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setCommandManagerOpen(true)}>
+                  {text.commandManager}
+                </Button>
+              </span>
+            </Tooltip>
+            <Typography className="terminal-settings-description">{text.commandManagerDescription}</Typography>
+
+            <Divider />
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.showSidebar}
+                  onChange={(event) => setSettings((current) => ({ ...current, showSidebar: event.target.checked }))}
+                />
+              }
+              label={text.showSessionSidebar}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.hideSidebarWhenSingleSession}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, hideSidebarWhenSingleSession: event.target.checked }))
+                  }
+                />
+              }
+              label={text.hideSidebarWhenSingleSession}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.confirmStop}
+                  onChange={(event) => setSettings((current) => ({ ...current, confirmStop: event.target.checked }))}
+                />
+              }
+              label={text.confirmBeforeStopping}
+            />
+
+            <Divider />
+
             <Box>
               <Typography className="terminal-settings-label">{text.fontSize}</Typography>
               <Slider
@@ -2130,63 +2356,6 @@ export function TerminalPage() {
               />
             </Stack>
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={settings.alwaysOnTop}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setSettings((current) => ({ ...current, alwaysOnTop: checked }));
-                    void window.bcwTerminal.setAlwaysOnTop(checked);
-                  }}
-                />
-              }
-              label={text.alwaysOnTop}
-            />
-
-            <Divider />
-
-            <Tooltip title={text.openCommandManagerTooltip}>
-              <span>
-                <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setCommandManagerOpen(true)}>
-                  {text.commandManager}
-                </Button>
-              </span>
-            </Tooltip>
-            <Typography className="terminal-settings-description">{text.commandManagerDescription}</Typography>
-
-            <Divider />
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={settings.showSidebar}
-                  onChange={(event) => setSettings((current) => ({ ...current, showSidebar: event.target.checked }))}
-                />
-              }
-              label={text.showSessionSidebar}
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={settings.hideSidebarWhenSingleSession}
-                  onChange={(event) =>
-                    setSettings((current) => ({ ...current, hideSidebarWhenSingleSession: event.target.checked }))
-                  }
-                />
-              }
-              label={text.hideSidebarWhenSingleSession}
-            />
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={settings.confirmStop}
-                  onChange={(event) => setSettings((current) => ({ ...current, confirmStop: event.target.checked }))}
-                />
-              }
-              label={text.confirmBeforeStopping}
-            />
-
             <Tooltip title={text.resetSettingsTooltip}>
               <span>
                 <Button variant="outlined" onClick={() => setSettings(createDefaultSettings())}>
@@ -2225,6 +2394,322 @@ export function TerminalPage() {
           <Button variant="contained" onClick={handleMkdirFromDialog} disabled={!mkdirFolderName.trim()}>
             {text.create}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog fullWidth maxWidth="md" open={automationManagerOpen} onClose={() => setAutomationManagerOpen(false)}>
+        <DialogTitle>{text.automationManager}</DialogTitle>
+        <DialogContent dividers>
+          <Tabs
+            value={automationManagerTab}
+            onChange={(_event, value: AutomationManagerTab) => setAutomationManagerTab(value)}
+            sx={{ mb: 2 }}
+          >
+            <Tab label={text.variableManager} value="variables" />
+            <Tab label={text.sequenceManager} value="sequences" />
+          </Tabs>
+          {automationManagerTab === 'variables' ? (
+          <Stack spacing={2}>
+            <Box>
+              <Typography className="terminal-settings-label">{text.variableManager}</Typography>
+              <Typography className="terminal-settings-description">{text.variableManagerDescription}</Typography>
+            </Box>
+
+            <Stack spacing={1}>
+              {commandVariables.length === 0 ? (
+                <Typography className="terminal-settings-description">{text.variablesEmpty}</Typography>
+              ) : (
+                commandVariables.map((variable) => (
+                  <Stack key={variable.id} direction="row" alignItems="flex-start" spacing={1}>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography className="terminal-settings-toggle-label">
+                        {variable.name} / {variable.kind === 'secret' ? text.variableKindSecret : text.variableKindText}
+                      </Typography>
+                      <Typography className="terminal-settings-description">
+                        {text.variableReference}: {toVariableReference(variable.name)}
+                      </Typography>
+                      {variable.description ? (
+                        <Typography className="terminal-settings-description">{variable.description}</Typography>
+                      ) : null}
+                    </Box>
+                    <Button size="small" variant="outlined" onClick={() => editCommandVariable(variable)}>
+                      {text.editButton}
+                    </Button>
+                    <Tooltip
+                      title={variable.kind === 'secret' ? text.variableTestSecretTooltip : createVariableTestCommand(variable.name)}
+                    >
+                      <span>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={variable.kind === 'secret' || !activeSession || activeSession.status === 'stopped'}
+                          onClick={() => handleTestCommandVariable(variable)}
+                        >
+                          {text.variableTestInTerminal}
+                        </Button>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={text.variableDeleteTooltip}>
+                      <span>
+                        <IconButton size="small" onClick={() => void handleDeleteCommandVariable(variable.id)}>
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </Stack>
+                ))
+              )}
+            </Stack>
+
+            <Divider />
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={resetVariableForm}>
+                {text.variableNew}
+              </Button>
+              {variableForm.name ? (
+                <Button
+                  variant="outlined"
+                  onClick={() => void window.bcwTerminal.writeClipboardText(toVariableReference(variableForm.name))}
+                >
+                  {text.variableReference}: {toVariableReference(variableForm.name)}
+                </Button>
+              ) : null}
+            </Stack>
+
+            <TextField
+              label={text.variableName}
+              size="small"
+              value={variableForm.name}
+              onChange={(event) =>
+                setVariableForm((current) => ({
+                  ...current,
+                  name: event.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''),
+                }))
+              }
+            />
+            <TextField
+              select
+              label={text.variableKind}
+              size="small"
+              value={variableForm.kind}
+              onChange={(event) =>
+                setVariableForm((current) => ({
+                  ...current,
+                  kind: event.target.value as CommandVariableKind,
+                  value: event.target.value === 'secret' ? '' : current.value,
+                }))
+              }
+            >
+              <MenuItem value="text">{text.variableKindText}</MenuItem>
+              <MenuItem value="secret">{text.variableKindSecret}</MenuItem>
+            </TextField>
+            <TextField
+              label={text.variableValue}
+              size="small"
+              type={variableForm.kind === 'secret' ? 'password' : 'text'}
+              value={variableForm.value}
+              helperText={variableForm.kind === 'secret' ? text.variableSecretPlaceholder : undefined}
+              onChange={(event) => setVariableForm((current) => ({ ...current, value: event.target.value }))}
+            />
+            <TextField
+              label={text.variableDescription}
+              size="small"
+              value={variableForm.description}
+              onChange={(event) => setVariableForm((current) => ({ ...current, description: event.target.value }))}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={variableForm.enabled}
+                  onChange={(event) => setVariableForm((current) => ({ ...current, enabled: event.target.checked }))}
+                />
+              }
+              label={text.variableEnabled}
+            />
+            {variableMessage ? (
+              <Typography className="terminal-settings-description">{variableMessage}</Typography>
+            ) : null}
+          </Stack>
+          ) : null}
+          {automationManagerTab === 'sequences' ? (
+          <Stack spacing={2}>
+            <Box>
+              <Typography className="terminal-settings-label">{text.sequenceManager}</Typography>
+              <Typography className="terminal-settings-description">{text.sequenceManagerDescription}</Typography>
+            </Box>
+
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+              <TextField
+                select
+                label={text.groupTarget}
+                size="small"
+                value={sequenceTargetId}
+                sx={{ minWidth: 260 }}
+                onChange={(event) => setSequenceTargetId(event.target.value)}
+              >
+                {settings.operationSequences.length === 0 ? (
+                  <MenuItem value="">{text.sequenceNoItems}</MenuItem>
+                ) : null}
+                {settings.operationSequences.map((sequence) => (
+                  <MenuItem key={sequence.id} value={sequence.id}>
+                    {sequence.title}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <Button variant="outlined" startIcon={<AddIcon />} onClick={handleCreateOperationSequence}>
+                {text.sequenceNew}
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                disabled={!selectedOperationSequence}
+                onClick={handleDeleteOperationSequence}
+              >
+                {text.deleteGroup}
+              </Button>
+            </Stack>
+
+            {selectedOperationSequence ? (
+              <>
+                <TextField
+                  label={text.sequenceTitle}
+                  size="small"
+                  value={selectedOperationSequence.title}
+                  onChange={(event) =>
+                    updateOperationSequence(selectedOperationSequence.id, (current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                />
+                <TextField
+                  label={text.sequenceDescription}
+                  size="small"
+                  value={selectedOperationSequence.description}
+                  onChange={(event) =>
+                    updateOperationSequence(selectedOperationSequence.id, (current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={selectedOperationSequence.visible}
+                      onChange={(event) =>
+                        updateOperationSequence(selectedOperationSequence.id, (current) => ({
+                          ...current,
+                          visible: event.target.checked,
+                        }))
+                      }
+                    />
+                  }
+                  label={text.menuVisible}
+                />
+
+                <Divider />
+
+                <Typography className="terminal-settings-label">{text.manageItems}</Typography>
+                <Stack spacing={2}>
+                  {selectedOperationSequence.steps.map((step, index) => (
+                    <Stack key={`${selectedOperationSequence.id}-${index}`} className="terminal-sequence-step" spacing={2}>
+                      <Stack className="terminal-sequence-step-header" direction="row" alignItems="center" spacing={1}>
+                        <Typography className="terminal-settings-toggle-label">Step {index + 1}</Typography>
+                        <Tooltip title={text.deleteItemTooltip}>
+                          <span>
+                            <IconButton size="small" onClick={() => handleRemoveSequenceStep(index)}>
+                              <DeleteOutlineIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </Stack>
+                      <TextField
+                        label={text.sequenceStepWaitFor}
+                        size="small"
+                        value={step.waitFor ?? ''}
+                        onChange={(event) =>
+                          updateSequenceStep(index, (current) => ({ ...current, waitFor: event.target.value }))
+                        }
+                      />
+                      <TextField
+                        label={text.sequenceInput}
+                        size="small"
+                        value={step.input}
+                        onChange={(event) =>
+                          updateSequenceStep(index, (current) => ({ ...current, input: event.target.value }))
+                        }
+                      />
+                      <Stack
+                        className="terminal-sequence-step-footer"
+                        direction={{ xs: 'column', sm: 'row' }}
+                        spacing={2}
+                      >
+                        <TextField
+                          label={text.sequenceDelayMs}
+                          size="small"
+                          type="number"
+                          value={step.delayMs ?? 0}
+                          onChange={(event) =>
+                            updateSequenceStep(index, (current) => ({
+                              ...current,
+                              delayMs: Math.max(0, Number(event.target.value) || 0),
+                            }))
+                          }
+                          sx={{ flex: 1 }}
+                        />
+                        <FormControlLabel
+                          className="terminal-sequence-submit-toggle"
+                          control={
+                            <Switch
+                              checked={step.submit !== false}
+                              onChange={(event) =>
+                                updateSequenceStep(index, (current) => ({
+                                  ...current,
+                                  submit: event.target.checked,
+                                }))
+                              }
+                            />
+                          }
+                          label={text.sequenceSubmit}
+                        />
+                      </Stack>
+                    </Stack>
+                  ))}
+                </Stack>
+                <Button variant="outlined" onClick={handleAddSequenceStep}>
+                  {text.sequenceAddStep}
+                </Button>
+                {sequenceMessage ? (
+                  <Typography className="terminal-settings-description">{sequenceMessage}</Typography>
+                ) : null}
+              </>
+            ) : (
+              <Typography className="terminal-settings-description">{text.sequenceNoItems}</Typography>
+            )}
+          </Stack>
+          ) : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAutomationManagerOpen(false)}>Close</Button>
+          {automationManagerTab === 'variables' ? (
+            <Button variant="contained" onClick={() => void handleSaveCommandVariable()} disabled={!variableForm.name.trim()}>
+              {text.jsonSave}
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              disabled={!selectedOperationSequence || !activeSession || activeSession.status === 'stopped'}
+              onClick={() => {
+                if (selectedOperationSequence) {
+                  void runOperationSequence(selectedOperationSequence);
+                }
+              }}
+            >
+              {text.runAgain}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

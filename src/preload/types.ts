@@ -4,6 +4,34 @@ export type CommandConfigFileResult = {
   content?: string;
   path?: string;
 };
+
+export type CommandVariableKind = 'text' | 'secret';
+export type CommandVariableSnapshot = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  kind: CommandVariableKind;
+  value?: string;
+  hasValue: boolean;
+  updatedAt: number;
+};
+
+export type CommandVariableInput = {
+  id?: string;
+  name: string;
+  description?: string;
+  enabled?: boolean;
+  kind: CommandVariableKind;
+  value?: string;
+};
+
+export type TerminalSequenceStep = {
+  input: string;
+  submit: boolean;
+  waitFor?: string;
+  delayMs?: number;
+};
 export type WindowStateSnapshot = {
   alwaysOnTop: boolean;
 };
@@ -32,12 +60,25 @@ export type AppUpdateState = {
 export type TerminalApi = {
   checkForAppUpdate: () => Promise<{ started: boolean; supported: boolean }>;
   createSession: () => Promise<TerminalSessionSnapshot>;
+  deleteCommandVariable: (id: string) => Promise<{ deleted: boolean }>;
+  executeCommand: (sessionId: string, command: string) => Promise<{ executed: boolean; missingVariables: string[] }>;
+  runSequence: (
+    sessionId: string,
+    steps: TerminalSequenceStep[],
+  ) => Promise<{
+    executed: boolean;
+    error?: string;
+    missingVariables: string[];
+    timedOutStepIndex: number | null;
+  }>;
   getAppUpdateState: () => Promise<AppUpdateState>;
+  listCommandVariables: () => Promise<CommandVariableSnapshot[]>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
   readClipboardText: () => Promise<string>;
   saveCommandConfigFile: (content: string, currentPath?: string) => Promise<CommandConfigFileResult>;
+  saveCommandVariable: (variable: CommandVariableInput) => Promise<CommandVariableSnapshot>;
   saveTerminalOutputFile: (content: string) => Promise<CommandConfigFileResult>;
   setAlwaysOnTop: (value: boolean) => Promise<void>;
   setLocale: (locale: AppLocale) => Promise<void>;

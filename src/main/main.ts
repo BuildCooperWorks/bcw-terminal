@@ -5,6 +5,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  safeStorage,
   type MenuItemConstructorOptions,
   type OpenDialogOptions,
   type SaveDialogOptions,
@@ -34,6 +35,7 @@ type TerminalSession = {
   title: string;
   cwd: string;
   shell: pty.IPty | null;
+  outputBuffer: string;
 };
 
 type AppLocale = 'ja' | 'en';
@@ -67,10 +69,40 @@ type AppUpdateState = {
     | 'unsupported';
 };
 
+type CommandVariableKind = 'text' | 'secret';
+type CommandVariableSnapshot = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  kind: CommandVariableKind;
+  value?: string;
+  hasValue: boolean;
+  updatedAt: number;
+};
+
+type StoredCommandVariable = Omit<CommandVariableSnapshot, 'value' | 'hasValue'> & {
+  encryptedValue?: string;
+  value?: string;
+};
+
+type CommandVariableFile = {
+  version: 1;
+  variables: StoredCommandVariable[];
+};
+
+type TerminalSequenceStep = {
+  input: string;
+  submit: boolean;
+  waitFor?: string;
+  delayMs?: number;
+};
+
 let mainWindow: BrowserWindow | null = null;
 let sessionCounter = 0;
 let appLocale: AppLocale = 'ja';
 const sessions = new Map<string, TerminalSession>();
+const sequenceWaiters = new Map<string, Set<() => void>>();
 const DEFAULT_WINDOW_STATE: WindowStateSnapshot = {
   width: 1240,
   height: 780,
@@ -169,6 +201,10 @@ function getWindowStateFilePath() {
   return path.join(app.getPath('userData'), 'window-state.json');
 }
 
+function getCommandVariablesFilePath() {
+  return path.join(app.getPath('userData'), 'command-variables.json');
+}
+
 function loadWindowState(): WindowStateSnapshot {
   const filePath = getWindowStateFilePath();
   if (!fs.existsSync(filePath)) {
@@ -202,6 +238,212 @@ function saveWindowState(window: BrowserWindow) {
 
   const filePath = getWindowStateFilePath();
   fs.writeFileSync(filePath, JSON.stringify(nextState, null, 2), 'utf8');
+}
+
+function isValidVariableName(name: string) {
+  return /^[A-Z_][A-Z0-9_]*$/.test(name);
+}
+
+function normalizeVariableName(name: string) {
+  return name.trim().replace(/[a-z]/g, (value) => value.toUpperCase());
+}
+
+function loadStoredCommandVariables(): StoredCommandVariable[] {
+  const filePath = getCommandVariablesFilePath();
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<CommandVariableFile>;
+    if (!Array.isArray(parsed.variables)) {
+      return [];
+    }
+
+    return parsed.variables.filter(
+      (item): item is StoredCommandVariable =>
+        Boolean(item) &&
+        typeof item.id === 'string' &&
+        typeof item.name === 'string' &&
+        (item.kind === 'text' || item.kind === 'secret'),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredCommandVariables(variables: StoredCommandVariable[]) {
+  const document: CommandVariableFile = {
+    version: 1,
+    variables,
+  };
+  fs.writeFileSync(getCommandVariablesFilePath(), JSON.stringify(document, null, 2), 'utf8');
+}
+
+function encryptVariableValue(value: string) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Encryption is not available on this device.');
+  }
+  return safeStorage.encryptString(value).toString('base64');
+}
+
+function decryptVariableValue(variable: StoredCommandVariable) {
+  if (variable.kind === 'text') {
+    return variable.value ?? '';
+  }
+
+  if (!variable.encryptedValue) {
+    return '';
+  }
+
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Encryption is not available on this device.');
+  }
+
+  return safeStorage.decryptString(Buffer.from(variable.encryptedValue, 'base64'));
+}
+
+function toCommandVariableSnapshot(variable: StoredCommandVariable): CommandVariableSnapshot {
+  return {
+    id: variable.id,
+    name: variable.name,
+    description: variable.description ?? '',
+    enabled: variable.enabled ?? true,
+    kind: variable.kind,
+    value: variable.kind === 'text' ? (variable.value ?? '') : undefined,
+    hasValue: variable.kind === 'secret' ? Boolean(variable.encryptedValue) : Boolean(variable.value),
+    updatedAt: variable.updatedAt ?? Date.now(),
+  };
+}
+
+function resolveCommandVariables(command: string) {
+  const variables = loadStoredCommandVariables().filter((variable) => variable.enabled !== false);
+  const variableMap = new Map(variables.map((variable) => [variable.name, variable]));
+  const missingNames = new Set<string>();
+
+  const resolvedCommand = command.replace(/\{\{([A-Z_][A-Z0-9_]*)\}\}/g, (match, variableName: string) => {
+    const variable = variableMap.get(variableName);
+    if (!variable) {
+      missingNames.add(variableName);
+      return match;
+    }
+
+    return decryptVariableValue(variable);
+  });
+
+  return {
+    command: resolvedCommand,
+    missingVariables: [...missingNames],
+  };
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function notifySequenceWaiters(sessionId: string) {
+  const waiters = sequenceWaiters.get(sessionId);
+  if (!waiters) {
+    return;
+  }
+
+  for (const waiter of waiters) {
+    waiter();
+  }
+}
+
+function waitForSessionOutput(session: TerminalSession, pattern: string, timeoutMs = 30_000) {
+  if (!pattern.trim()) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    const startedAt = Date.now();
+    let timeoutId: NodeJS.Timeout | undefined;
+    let intervalId: NodeJS.Timeout | undefined;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      sequenceWaiters.get(session.id)?.delete(check);
+    };
+
+    const check = () => {
+      if (session.outputBuffer.toLowerCase().includes(pattern.toLowerCase())) {
+        cleanup();
+        resolve(true);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        cleanup();
+        resolve(false);
+      }
+    };
+
+    const waiters = sequenceWaiters.get(session.id) ?? new Set<() => void>();
+    waiters.add(check);
+    sequenceWaiters.set(session.id, waiters);
+
+    timeoutId = setTimeout(check, timeoutMs);
+    intervalId = setInterval(check, 250);
+    check();
+  });
+}
+
+async function runTerminalSequence(sessionId: string, steps: TerminalSequenceStep[]) {
+  const session = sessions.get(sessionId);
+  if (!session?.shell) {
+    return {
+      executed: false,
+      error: 'Terminal session is not running.',
+      missingVariables: [],
+      timedOutStepIndex: null,
+    };
+  }
+
+  for (const [index, step] of steps.entries()) {
+    if (step.waitFor) {
+      const matched = await waitForSessionOutput(session, step.waitFor);
+      if (!matched) {
+        return {
+          executed: false,
+          error: `Timed out waiting for "${step.waitFor}".`,
+          missingVariables: [],
+          timedOutStepIndex: index,
+        };
+      }
+    }
+
+    const resolved = resolveCommandVariables(step.input ?? '');
+    if (resolved.missingVariables.length > 0) {
+      return {
+        executed: false,
+        error: undefined,
+        missingVariables: resolved.missingVariables,
+        timedOutStepIndex: null,
+      };
+    }
+
+    session.shell.write(step.submit === false ? resolved.command : `${resolved.command}\r`);
+
+    if (step.delayMs && step.delayMs > 0) {
+      await delay(Math.min(step.delayMs, 60_000));
+    }
+  }
+
+  return {
+    executed: true,
+    error: undefined,
+    missingVariables: [],
+    timedOutStepIndex: null,
+  };
 }
 
 function createWindow() {
@@ -384,7 +626,7 @@ function updateApplicationMenu(locale: AppLocale) {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function spawnShell(session: Omit<TerminalSession, 'shell'>) {
+function spawnShell(session: Pick<TerminalSession, 'id' | 'title' | 'cwd'>) {
   const shell = pty.spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass'], {
     cols: 120,
     rows: 32,
@@ -394,11 +636,15 @@ function spawnShell(session: Omit<TerminalSession, 'shell'>) {
   });
 
   shell.onData((output) => {
+    const nextSession = sessions.get(session.id);
+    if (nextSession) {
+      nextSession.outputBuffer = `${nextSession.outputBuffer}${stripAnsi(output)}`.slice(-20_000);
+    }
     sendToRenderer(TERMINAL_OUTPUT, { sessionId: session.id, output });
+    notifySequenceWaiters(session.id);
 
     const promptMatch = stripAnsi(output).match(/PS\s+(.+?)>\s*$/m);
     if (promptMatch?.[1]) {
-      const nextSession = sessions.get(session.id);
       if (nextSession) {
         nextSession.cwd = promptMatch[1];
       }
@@ -475,7 +721,7 @@ function createSession() {
     cwd: defaultCwd,
   };
   const shell = spawnShell(sessionBase);
-  const session = { ...sessionBase, shell };
+  const session: TerminalSession = { ...sessionBase, shell, outputBuffer: '' };
 
   sessions.set(session.id, session);
 
@@ -491,6 +737,36 @@ ipcMain.handle('terminal:create-session', () => createSession());
 ipcMain.on('terminal:data', (_event, payload: { sessionId: string; data: string }) => {
   sessions.get(payload.sessionId)?.shell?.write(payload.data);
 });
+
+ipcMain.handle('terminal:execute-command', (_event, payload: { sessionId: string; command: string }) => {
+  const session = sessions.get(payload.sessionId);
+  if (!session?.shell) {
+    return {
+      executed: false,
+      missingVariables: [],
+    };
+  }
+
+  const resolved = resolveCommandVariables(payload.command ?? '');
+  if (resolved.missingVariables.length > 0) {
+    return {
+      executed: false,
+      missingVariables: resolved.missingVariables,
+    };
+  }
+
+  session.shell.write(`${resolved.command}\r`);
+  return {
+    executed: true,
+    missingVariables: [],
+  };
+});
+
+ipcMain.handle(
+  'terminal:run-sequence',
+  (_event, payload: { sessionId: string; steps: TerminalSequenceStep[] }) =>
+    runTerminalSequence(payload.sessionId, Array.isArray(payload.steps) ? payload.steps : []),
+);
 
 ipcMain.on('terminal:resize', (_event, payload: { sessionId: string; cols: number; rows: number }) => {
   if (payload.cols < 1 || payload.rows < 1) {
@@ -562,6 +838,72 @@ ipcMain.handle('window:set-always-on-top', (_event, value: boolean) => {
     mainWindow.setAlwaysOnTop(false, 'normal');
   }
   saveWindowState(mainWindow);
+});
+
+ipcMain.handle('command-variables:list', () => loadStoredCommandVariables().map(toCommandVariableSnapshot));
+
+ipcMain.handle(
+  'command-variables:save',
+  (_event, payload: {
+    id?: string;
+    name: string;
+    description?: string;
+    enabled?: boolean;
+    kind: CommandVariableKind;
+    value?: string;
+  }) => {
+    const name = normalizeVariableName(payload.name ?? '');
+    if (!isValidVariableName(name)) {
+      throw new Error('Variable name must use A-Z, 0-9, and underscore, and cannot start with a number.');
+    }
+
+    const variables = loadStoredCommandVariables();
+    const existingIndex = variables.findIndex((variable) => variable.id === payload.id);
+    const duplicate = variables.some((variable, index) => variable.name === name && index !== existingIndex);
+    if (duplicate) {
+      throw new Error(`Variable "${name}" already exists.`);
+    }
+
+    const existing = existingIndex >= 0 ? variables[existingIndex] : undefined;
+    const now = Date.now();
+    const kind: CommandVariableKind = payload.kind === 'secret' ? 'secret' : 'text';
+    const next: StoredCommandVariable = {
+      id: existing?.id ?? `variable-${now}-${Math.random().toString(16).slice(2, 8)}`,
+      name,
+      description: payload.description ?? existing?.description ?? '',
+      enabled: payload.enabled ?? existing?.enabled ?? true,
+      kind,
+      updatedAt: now,
+    };
+
+    if (kind === 'secret') {
+      if (typeof payload.value === 'string' && payload.value.length > 0) {
+        next.encryptedValue = encryptVariableValue(payload.value);
+      } else if (existing?.kind === 'secret' && existing.encryptedValue) {
+        next.encryptedValue = existing.encryptedValue;
+      }
+    } else {
+      next.value = payload.value ?? (existing?.kind === 'text' ? existing.value : '') ?? '';
+    }
+
+    if (existingIndex >= 0) {
+      variables[existingIndex] = next;
+    } else {
+      variables.push(next);
+    }
+
+    saveStoredCommandVariables(variables);
+    return toCommandVariableSnapshot(next);
+  },
+);
+
+ipcMain.handle('command-variables:delete', (_event, id: string) => {
+  const variables = loadStoredCommandVariables();
+  const nextVariables = variables.filter((variable) => variable.id !== id);
+  saveStoredCommandVariables(nextVariables);
+  return {
+    deleted: nextVariables.length !== variables.length,
+  };
 });
 
 ipcMain.handle('command-config:load-file', async () => {
