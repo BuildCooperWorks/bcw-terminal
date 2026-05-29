@@ -183,6 +183,17 @@ body {
   white-space: nowrap;
 }
 
+.terminal-connection-chip {
+  height: 18px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.terminal-connection-chip .MuiChip-label {
+  padding-inline: 6px;
+}
+
 .terminal-file-tree {
   min-height: 0;
   overflow: auto;

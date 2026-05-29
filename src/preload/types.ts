@@ -45,6 +45,16 @@ export type DirectoryListing = {
   path: string;
 };
 
+// Pushed from main when a `ls` in the live shell updates the explorer, or when a
+// remote SSH session is entered/left (cleared = true) so the stale tree is dropped.
+export type DirectoryUpdateEvent = {
+  sessionId: string;
+  cleared?: boolean;
+  remote?: boolean;
+  rootPath?: string;
+  entries?: FileSystemEntry[];
+};
+
 export type FileViewCheck = {
   reason?: string;
   viewable: boolean;
@@ -97,7 +107,8 @@ export type TerminalApi = {
   listCommandVariables: () => Promise<CommandVariableSnapshot[]>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
   canViewFileInTerminal: (filePath: string) => Promise<FileViewCheck>;
-  listDirectory: (directoryPath: string) => Promise<DirectoryListing>;
+  listDirectory: (directoryPath: string, sessionId?: string) => Promise<DirectoryListing>;
+  refreshRemoteExplorer: (sessionId: string) => Promise<void>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
   readClipboardText: () => Promise<string>;
@@ -116,6 +127,7 @@ export type TerminalApi = {
   onCwdChange: (callback: (event: TerminalCwdEvent) => void) => () => void;
   onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
   onSaveTerminalOutputRequest: (callback: () => void) => () => void;
+  onDirectoryUpdate: (callback: (event: DirectoryUpdateEvent) => void) => () => void;
 };
 
 export type TerminalSessionSnapshot = {

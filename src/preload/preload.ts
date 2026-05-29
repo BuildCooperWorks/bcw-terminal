@@ -3,6 +3,7 @@ import type {
   AppUpdateState,
   CommandVariableInput,
   DirectoryListing,
+  DirectoryUpdateEvent,
   FileViewCheck,
   TerminalCwdEvent,
   TerminalExitEvent,
@@ -43,8 +44,10 @@ const terminalApi = {
     ipcRenderer.invoke('filesystem:can-view-file-in-terminal', filePath),
   loadCommandConfigFile: () => ipcRenderer.invoke('command-config:load-file'),
   listCommandVariables: () => ipcRenderer.invoke('command-variables:list'),
-  listDirectory: (directoryPath: string): Promise<DirectoryListing> =>
-    ipcRenderer.invoke('filesystem:list-directory', directoryPath),
+  listDirectory: (directoryPath: string, sessionId?: string): Promise<DirectoryListing> =>
+    ipcRenderer.invoke('filesystem:list-directory', directoryPath, sessionId),
+  refreshRemoteExplorer: (sessionId: string): Promise<void> =>
+    ipcRenderer.invoke('filesystem:refresh-remote', sessionId),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   saveCommandConfigFile: (content: string, currentPath?: string) =>
     ipcRenderer.invoke('command-config:save-file', { content, currentPath }),
@@ -93,6 +96,12 @@ const terminalApi = {
     ipcRenderer.on('terminal:save-output-request', listener);
 
     return () => ipcRenderer.removeListener('terminal:save-output-request', listener);
+  },
+  onDirectoryUpdate: (callback: (event: DirectoryUpdateEvent) => void) => {
+    const listener = (_event: IpcRendererEvent, payload: DirectoryUpdateEvent) => callback(payload);
+    ipcRenderer.on('filesystem:directory-update', listener);
+
+    return () => ipcRenderer.removeListener('filesystem:directory-update', listener);
   },
 };
 

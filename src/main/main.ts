@@ -30,9 +30,16 @@ const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
 const TERMINAL_SAVE_OUTPUT_REQUEST = 'terminal:save-output-request';
+const FILESYSTEM_DIRECTORY_UPDATE = 'filesystem:directory-update';
 const APP_UPDATE_STATUS = 'app:update-status';
 const execFileAsync = promisify(execFile);
 const WSL_PATH_PREFIX = 'wsl:';
+const REMOTE_PATH_PREFIX = 'remote:';
+// Marker tokens used to fence the output of an injected `ls` so we can extract
+// just the listing from the shared terminal buffer without showing it to the user.
+const REMOTE_LIST_MARKER_BEGIN = '__BCW_LS_BEGIN__';
+const REMOTE_LIST_MARKER_END = '__BCW_LS_END__';
+const REMOTE_LIST_MARKER_ERROR = '__BCW_LS_ERR__';
 
 type TerminalSession = {
   id: string;
@@ -41,6 +48,21 @@ type TerminalSession = {
   shell: pty.IPty | null;
   outputBuffer: string;
   autoChangedWslHome: boolean;
+  // First `user@host` seen in this session — the local shell (Windows WSL).
+  // A later prompt with a different host means we've jumped to a remote SSH host.
+  localShellHost: string | null;
+  // Set once a remote (SSH) prompt is detected. While set, the file explorer
+  // lists directories by injecting a fenced `ls` into this session instead of
+  // reading the local filesystem.
+  remoteHost: string | null;
+  // Serializes concurrent remote `ls` injections so their fenced outputs don't interleave.
+  remoteListQueue: Promise<unknown>;
+  // Trailing partial line held back from the renderer so we can drop whole lines
+  // that contain our injected `ls` markers even when they span PTY chunks.
+  pendingDisplayChunk: string;
+  // True while output is between a begin and end marker — that whole region (the
+  // injected `ls` output) is hidden from the terminal display.
+  suppressingMarkerOutput: boolean;
 };
 
 type AppLocale = 'ja' | 'en';
@@ -187,6 +209,12 @@ const MENU_TEXT = {
 } as const;
 
 function getDefaultStartupCwd() {
+  // Reopen the last local directory if it still exists.
+  const lastCwd = loadLastLocalCwd();
+  if (lastCwd && fs.existsSync(lastCwd)) {
+    return lastCwd;
+  }
+
   if (process.platform === 'win32') {
     const home = app.getPath('home') || process.env.USERPROFILE;
     if (home && fs.existsSync(home)) {
@@ -212,16 +240,92 @@ function stripAnsi(value: string) {
     .replace(/\x1B[@-_]/g, '');
 }
 
-function detectPromptCwd(output: string) {
+const REMOTE_MARKER_PREFIX = '__BCW_LS_';
+
+// Hides the injected `ls` probe from the terminal display. Everything from the
+// begin marker line through the end marker line (the probe command echo, its
+// listing output, and the markers themselves) is dropped. Normal output is passed
+// through, but a trailing partial line is held back when it could be the start of
+// a marker so that markers split across PTY chunks are still caught.
+function filterMarkerLines(session: TerminalSession, output: string) {
+  const combined = session.pendingDisplayChunk + output;
+
+  // Fast path: nothing marker-related anywhere and we're not mid-suppression.
+  if (!session.suppressingMarkerOutput && !combined.includes(REMOTE_MARKER_PREFIX)) {
+    const newlineIndex = combined.lastIndexOf('\n');
+    const tail = combined.slice(newlineIndex + 1);
+    if (tail.length > 0 && tail.length < REMOTE_MARKER_PREFIX.length && REMOTE_MARKER_PREFIX.startsWith(tail)) {
+      session.pendingDisplayChunk = tail;
+      return combined.slice(0, newlineIndex + 1);
+    }
+    session.pendingDisplayChunk = '';
+    return combined;
+  }
+
+  // Process complete lines; hold back the final partial line for the next chunk.
+  const newlineIndex = combined.lastIndexOf('\n');
+  const complete = combined.slice(0, newlineIndex + 1);
+  const tail = combined.slice(newlineIndex + 1);
+  session.pendingDisplayChunk = tail;
+
+  let result = '';
+  for (const line of complete.split(/(?<=\n)/)) {
+    const hasBegin = line.includes(`${REMOTE_LIST_MARKER_BEGIN}`);
+    const hasEnd = line.includes(`${REMOTE_LIST_MARKER_END}`) || line.includes(REMOTE_LIST_MARKER_ERROR);
+
+    if (session.suppressingMarkerOutput) {
+      // Inside a suppressed region: drop the line; the end marker closes it.
+      if (hasEnd) {
+        session.suppressingMarkerOutput = false;
+      }
+      continue;
+    }
+
+    if (hasBegin) {
+      // Begin marker opens suppression. The command-echo line carries both begin
+      // and end; if this same line also has the end marker it stays closed.
+      session.suppressingMarkerOutput = !hasEnd;
+      continue;
+    }
+
+    if (line.includes(REMOTE_MARKER_PREFIX)) {
+      // A stray marker fragment — drop it to be safe.
+      continue;
+    }
+
+    result += line;
+  }
+
+  return result;
+}
+
+type DetectedPrompt = {
+  // Display cwd derived from the prompt, or null when the prompt only shows a
+  // basename (common on remote bracket prompts) and the real path is unknown.
+  cwd: string | null;
+  // Host portion of a `user@host` prompt, when present. Used to tell a remote
+  // SSH shell apart from the local Windows/WSL shell.
+  host: string | null;
+};
+
+function detectPromptCwd(output: string): DetectedPrompt | null {
   const tail = output.trimEnd();
   const powerShellMatch = tail.match(/(?:^|\n)PS\s+([^>\r\n]+)>\s*$/);
   if (powerShellMatch?.[1]) {
-    return powerShellMatch[1];
+    return { cwd: powerShellMatch[1], host: null };
   }
 
-  const wslPromptMatch = tail.match(/(?:^|\n)[^\s@]+@[^:\r\n]+:([^\r\n]+?)[#$]\s*$/);
-  if (wslPromptMatch?.[1]) {
-    return toWslDisplayPath(wslPromptMatch[1]);
+  // Bracket prompt, e.g. "[root@dev-aws01 home]#". The path segment is usually a
+  // basename (bash \W), so we only capture the host and resolve the real cwd later.
+  const bracketMatch = tail.match(/(?:^|\n)\[[^\s@\]]+@([^\s\]]+)\s+[^\]]*\][#$]\s*$/);
+  if (bracketMatch?.[1]) {
+    return { cwd: null, host: bracketMatch[1] };
+  }
+
+  // Colon prompt, e.g. "user@host:/path$" (local WSL and many SSH shells).
+  const colonMatch = tail.match(/(?:^|\n)[^\s@]+@([^:\s\r\n]+):([^\r\n]+?)[#$]\s*$/);
+  if (colonMatch) {
+    return { cwd: toWslDisplayPath(colonMatch[2]), host: colonMatch[1] };
   }
 
   return null;
@@ -250,6 +354,27 @@ function isWslDisplayPath(value: string) {
 
 function isMountedWindowsHomePath(value: string) {
   return /^wsl:\/mnt\/[a-z]\/Users\/[^/]+\/?$/i.test(value);
+}
+
+function isRemoteDisplayPath(value: string) {
+  return value.startsWith(REMOTE_PATH_PREFIX);
+}
+
+// Remote display paths are "remote:<host>:<subpath>". An empty subpath means
+// "the session's current directory" (resolved via `pwd`); otherwise it is an
+// absolute path on the remote host.
+function parseRemoteDisplayPath(value: string) {
+  const rest = value.slice(REMOTE_PATH_PREFIX.length);
+  const separator = rest.indexOf(':');
+  if (separator === -1) {
+    return { host: rest, subPath: '' };
+  }
+  return { host: rest.slice(0, separator), subPath: rest.slice(separator + 1) };
+}
+
+function joinRemoteDisplayPath(host: string, absolutePath: string, name: string) {
+  const normalizedBase = absolutePath === '/' ? '' : absolutePath.replace(/\/+$/, '');
+  return `${REMOTE_PATH_PREFIX}${host}:${normalizedBase}/${name}`;
 }
 
 function joinWslPath(basePath: string, name: string) {
@@ -302,6 +427,36 @@ function getWindowStateFilePath() {
 
 function getCommandVariablesFilePath() {
   return path.join(app.getPath('userData'), 'command-variables.json');
+}
+
+function getLastCwdFilePath() {
+  return path.join(app.getPath('userData'), 'last-cwd.json');
+}
+
+// Remembers the most recent local Windows directory so new sessions can reopen
+// there. WSL and remote paths aren't valid spawn cwds, so they're never stored.
+function loadLastLocalCwd(): string | null {
+  const filePath = getLastCwdFilePath();
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { cwd?: unknown };
+    return typeof parsed.cwd === 'string' ? parsed.cwd : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLastLocalCwd(cwd: string) {
+  if (isWslDisplayPath(cwd) || isRemoteDisplayPath(cwd)) {
+    return;
+  }
+  try {
+    fs.writeFileSync(getLastCwdFilePath(), JSON.stringify({ cwd }, null, 2), 'utf8');
+  } catch {
+    // Best-effort persistence; ignore write failures.
+  }
 }
 
 function loadWindowState(): WindowStateSnapshot {
@@ -611,8 +766,12 @@ function getReadableAutoUpdateError(error: Error) {
   return singleLine.length > 280 ? `${singleLine.slice(0, 277)}...` : singleLine;
 }
 
-async function listDirectory(directoryPath: string) {
+async function listDirectory(directoryPath: string, sessionId?: string) {
   const targetPath = typeof directoryPath === 'string' && directoryPath.trim() ? directoryPath : getDefaultStartupCwd();
+
+  if (isRemoteDisplayPath(targetPath)) {
+    return listRemoteDirectory(targetPath, sessionId);
+  }
 
   if (isWslDisplayPath(targetPath)) {
     return listWslDirectory(targetPath);
@@ -707,9 +866,186 @@ async function listWslDirectory(displayPath: string) {
   }
 }
 
+function escapeSingleQuotes(value: string) {
+  return value.replace(/'/g, `'\\''`);
+}
+
+// Inject a single fenced command into the live remote shell and wait until the
+// end marker shows up in the output buffer, then return the text between the
+// begin and end markers. Injections are serialized per session via remoteListQueue
+// so concurrent listings don't interleave their fenced output.
+async function runFencedRemoteCommand(session: TerminalSession, innerCommand: string) {
+  const run = async () => {
+    if (!session.shell) {
+      return null;
+    }
+
+    const marker = Math.random().toString(36).slice(2, 10);
+    const begin = `${REMOTE_LIST_MARKER_BEGIN}${marker}`;
+    const end = `${REMOTE_LIST_MARKER_END}${marker}`;
+
+    // Assemble the markers from a shell variable so the echoed command line shows
+    // them as "...$m" (unexpanded) while only the real command OUTPUT contains the
+    // fully expanded tokens. This lets us match output markers without colliding
+    // with the command line the shell echoes back.
+    session.shell.write(
+      `__m=${marker}; echo "${REMOTE_LIST_MARKER_BEGIN}$__m"; ${innerCommand}; echo "${REMOTE_LIST_MARKER_END}$__m"\r`,
+    );
+
+    const matched = await waitForSessionOutput(session, end, 15_000);
+    if (!matched) {
+      return null;
+    }
+
+    const buffer = session.outputBuffer;
+    const beginIndex = buffer.lastIndexOf(begin);
+    if (beginIndex === -1) {
+      return null;
+    }
+    const endIndex = buffer.indexOf(end, beginIndex + begin.length);
+    if (endIndex === -1) {
+      return null;
+    }
+    return buffer.slice(beginIndex + begin.length, endIndex);
+  };
+
+  const result = session.remoteListQueue.then(run, run);
+  // Keep the queue alive regardless of this call's outcome.
+  session.remoteListQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function listRemoteDirectory(displayPath: string, sessionId?: string) {
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session?.shell || !session.remoteHost) {
+    return {
+      entries: [],
+      error: 'Remote session is not available.',
+      path: displayPath,
+    };
+  }
+
+  const { subPath } = parseRemoteDisplayPath(displayPath);
+  const targetDir = subPath || '.';
+  const quotedDir = escapeSingleQuotes(targetDir);
+  // `pwd` resolves the absolute path (the prompt only shows a basename); `ls -1Ap`
+  // lists one entry per line, includes dotfiles, and appends `/` to directories.
+  const inner = `( cd '${quotedDir}' 2>/dev/null && pwd && ls -1Ap ) || echo ${REMOTE_LIST_MARKER_ERROR}`;
+
+  let output: string | null;
+  try {
+    output = await runFencedRemoteCommand(session, inner);
+  } catch (error) {
+    return {
+      entries: [],
+      error: error instanceof Error ? error.message : String(error),
+      path: displayPath,
+    };
+  }
+
+  if (output === null || output.includes(REMOTE_LIST_MARKER_ERROR)) {
+    return {
+      entries: [],
+      error: 'Failed to list the remote directory.',
+      path: displayPath,
+    };
+  }
+
+  const remoteHost = session.remoteHost;
+  const { absolutePath, entries } = parseShellListing(output, (base, name) =>
+    joinRemoteDisplayPath(remoteHost, base, name),
+  );
+
+  return {
+    entries,
+    path: `${REMOTE_PATH_PREFIX}${remoteHost}:${absolutePath}`,
+  };
+}
+
+// Parses the fenced "pwd + ls -1Ap" output into the absolute path and entries,
+// building display paths for either a remote host or local WSL.
+function parseShellListing(output: string, makePath: (absolutePath: string, name: string) => string) {
+  const lines = stripAnsi(output)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const absolutePath = lines.shift() ?? '/';
+
+  const entries = lines
+    .map<FileSystemEntry | null>((line) => {
+      const isDirectory = line.endsWith('/');
+      const name = isDirectory ? line.slice(0, -1) : line;
+      if (!name || name === '.' || name === '..') {
+        return null;
+      }
+      return {
+        name,
+        path: makePath(absolutePath, name),
+        type: isDirectory ? 'directory' : 'file',
+      };
+    })
+    .filter((entry): entry is FileSystemEntry => Boolean(entry))
+    .sort((left, right) => {
+      if (left.type !== right.type) {
+        return left.type === 'directory' ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+    })
+    .slice(0, 500);
+
+  return { absolutePath, entries };
+}
+
+// Runs a fenced "pwd + ls" in the live remote shell and pushes the resulting
+// listing to the renderer. Triggered when the user runs `ls` on a remote SSH
+// host, so the explorer follows wherever the remote shell currently is.
+async function refreshExplorerFromShell(session: TerminalSession) {
+  const remoteHost = session.remoteHost;
+  if (!remoteHost) {
+    return;
+  }
+
+  const inner = `( pwd && ls -1Ap ) 2>/dev/null || echo ${REMOTE_LIST_MARKER_ERROR}`;
+
+  let output: string | null;
+  try {
+    output = await runFencedRemoteCommand(session, inner);
+  } catch {
+    return;
+  }
+
+  if (output === null || output.includes(REMOTE_LIST_MARKER_ERROR)) {
+    return;
+  }
+
+  const { absolutePath, entries } = parseShellListing(output, (base, name) =>
+    joinRemoteDisplayPath(remoteHost, base, name),
+  );
+  const rootPath = `${REMOTE_PATH_PREFIX}${remoteHost}:${absolutePath}`;
+
+  // Keep cwd in sync so the explorer header and later navigation use this path.
+  session.cwd = rootPath;
+  sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: rootPath });
+  sendToRenderer(FILESYSTEM_DIRECTORY_UPDATE, {
+    sessionId: session.id,
+    rootPath,
+    entries,
+    remote: true,
+  });
+}
+
 async function canViewFileInTerminal(filePath: string) {
   if (typeof filePath !== 'string' || !filePath.trim()) {
     return { viewable: false, reason: 'invalid-path' };
+  }
+
+  // Remote files can't be stat-ed locally; let the terminal `cat` attempt it.
+  if (isRemoteDisplayPath(filePath)) {
+    return { viewable: true };
   }
 
   if (isWslDisplayPath(filePath)) {
@@ -950,16 +1286,62 @@ function spawnShell(session: Pick<TerminalSession, 'id' | 'title' | 'cwd'>) {
   shell.onData((output) => {
     const nextSession = sessions.get(session.id);
     let cleanTail = stripAnsi(output);
+    let displayOutput = output;
     if (nextSession) {
       nextSession.outputBuffer = `${nextSession.outputBuffer}${stripAnsi(output)}`.slice(-20_000);
       cleanTail = nextSession.outputBuffer;
+      displayOutput = filterMarkerLines(nextSession, output);
     }
-    sendToRenderer(TERMINAL_OUTPUT, { sessionId: session.id, output });
+    if (displayOutput) {
+      sendToRenderer(TERMINAL_OUTPUT, { sessionId: session.id, output: displayOutput });
+    }
     notifySequenceWaiters(session.id);
 
-    const nextCwd = detectPromptCwd(cleanTail);
+    const prompt = detectPromptCwd(cleanTail);
 
-    if (nextCwd) {
+    if (prompt) {
+      if (nextSession) {
+        // Remember the first host seen (local WSL). A different host later = remote SSH.
+        if (prompt.host && !nextSession.localShellHost) {
+          nextSession.localShellHost = prompt.host;
+        }
+
+        const wasRemote = Boolean(nextSession.remoteHost);
+        const isRemote = Boolean(
+          prompt.host && nextSession.localShellHost && prompt.host !== nextSession.localShellHost,
+        );
+        nextSession.remoteHost = isRemote ? prompt.host : null;
+
+        // On entering/leaving a remote host, clear the explorer; the listing will
+        // be refreshed the next time the user runs `ls`.
+        if (isRemote !== wasRemote) {
+          sendToRenderer(FILESYSTEM_DIRECTORY_UPDATE, {
+            sessionId: session.id,
+            cleared: true,
+            remote: isRemote,
+          });
+        }
+
+        if (isRemote) {
+          // Mark the cwd as remote so the UI reflects the SSH connection (the chip
+          // and a cleared explorer) immediately, without waiting for an `ls`. The
+          // real path is resolved via `pwd` when the user runs `ls`; once that has
+          // populated a full "remote:host:/path", don't clobber it back to empty.
+          const remotePrefix = `${REMOTE_PATH_PREFIX}${prompt.host}:`;
+          if (!nextSession.cwd.startsWith(remotePrefix)) {
+            nextSession.cwd = remotePrefix;
+            sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: remotePrefix });
+          }
+          // Don't overwrite cwd with a local path while on a remote host.
+          return;
+        }
+      }
+
+      const nextCwd = prompt.cwd;
+      if (!nextCwd) {
+        return;
+      }
+
       if (
         nextSession &&
         !nextSession.autoChangedWslHome &&
@@ -977,6 +1359,11 @@ function spawnShell(session: Pick<TerminalSession, 'id' | 'title' | 'cwd'>) {
         nextSession.cwd = nextCwd;
       }
       sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: nextCwd });
+
+      // Remember local Windows directories so the next launch reopens here.
+      if (!isWslDisplayPath(nextCwd)) {
+        saveLastLocalCwd(nextCwd);
+      }
     }
   });
 
@@ -1049,7 +1436,17 @@ function createSession() {
     cwd: defaultCwd,
   };
   const shell = spawnShell(sessionBase);
-  const session: TerminalSession = { ...sessionBase, shell, outputBuffer: '', autoChangedWslHome: false };
+  const session: TerminalSession = {
+    ...sessionBase,
+    shell,
+    outputBuffer: '',
+    autoChangedWslHome: false,
+    localShellHost: null,
+    remoteHost: null,
+    remoteListQueue: Promise.resolve(),
+    pendingDisplayChunk: '',
+    suppressingMarkerOutput: false,
+  };
 
   sessions.set(session.id, session);
 
@@ -1061,11 +1458,23 @@ function createSession() {
 }
 
 ipcMain.handle('terminal:create-session', () => createSession());
-ipcMain.handle('filesystem:list-directory', (_event, directoryPath: string) => listDirectory(directoryPath));
+ipcMain.handle('filesystem:list-directory', (_event, directoryPath: string, sessionId?: string) =>
+  listDirectory(directoryPath, sessionId),
+);
 ipcMain.handle('filesystem:can-view-file-in-terminal', (_event, filePath: string) => canViewFileInTerminal(filePath));
 
 ipcMain.on('terminal:data', (_event, payload: { sessionId: string; data: string }) => {
   sessions.get(payload.sessionId)?.shell?.write(payload.data);
+});
+
+// The renderer calls this when the user runs a listing command (`ls`, etc.). For
+// a remote SSH session we re-fetch the directory via a hidden fenced `ls` and
+// push the result to the explorer; for local shells it's a no-op.
+ipcMain.handle('filesystem:refresh-remote', (_event, sessionId: string) => {
+  const session = sessions.get(sessionId);
+  if (session?.shell && session.remoteHost) {
+    void refreshExplorerFromShell(session);
+  }
 });
 
 ipcMain.handle(

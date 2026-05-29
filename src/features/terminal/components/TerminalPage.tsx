@@ -28,6 +28,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import {
   Box,
   Button,
+  Chip,
   Dialog,
   DialogActions,
   DialogContent,
@@ -199,8 +200,12 @@ const LOCALE_TEXT = {
     editTooltip: 'Copy / paste / save / interrupt / clear',
     closeFileExplorer: 'Close file explorer',
     expandFileExplorer: 'Expand file explorer',
+    connectionTooltipLocal: 'Local Windows shell. The file list follows the current directory automatically.',
+    connectionTooltipWsl: 'WSL shell. The file list follows the current directory automatically.',
+    connectionTooltipSsh: 'Remote SSH host. The file list updates when you run `ls` in the terminal.',
     fileExplorer: 'Files',
     fileTreeEmpty: 'No files',
+    fileTreeEmptyRemote: 'Run `ls` in the terminal to update the list.',
     fileTreeError: 'Cannot read folder',
     fileTreeLoading: 'Loading...',
     fileViewFailed: 'Cannot view file.',
@@ -345,8 +350,12 @@ const LOCALE_TEXT = {
     editTooltip: 'コピー / 貼り付け / 保存 / 割り込み / クリア',
     closeFileExplorer: 'ファイルサイドバーを閉じる',
     expandFileExplorer: 'ファイルサイドバーを展開',
+    connectionTooltipLocal: 'ローカル Windows シェルです。ファイル一覧は現在のディレクトリに自動で追従します。',
+    connectionTooltipWsl: 'WSL シェルです。ファイル一覧は現在のディレクトリに自動で追従します。',
+    connectionTooltipSsh: 'リモート SSH 接続です。ターミナルで ls を実行するとファイル一覧が更新されます。',
     fileExplorer: 'ファイル',
     fileTreeEmpty: 'ファイルはありません',
+    fileTreeEmptyRemote: 'ターミナルで ls を実行すると更新されます。',
     fileTreeError: 'フォルダーを読めません',
     fileTreeLoading: '読み込み中...',
     fileViewFailed: 'ファイルを表示できません。',
@@ -1114,7 +1123,8 @@ export function TerminalPage() {
     void window.bcwTerminal.setLocale(settings.locale);
   }, [settings.locale]);
 
-  const loadFileTreeDirectory = useCallback(async (directoryPath: string, options?: { resetRoot?: boolean }) => {
+  const loadFileTreeDirectory = useCallback(
+    async (directoryPath: string, options?: { resetRoot?: boolean; sessionId?: string }) => {
     if (!directoryPath) {
       return;
     }
@@ -1126,7 +1136,7 @@ export function TerminalPage() {
       loadingPaths: { ...current.loadingPaths, [directoryPath]: true },
     }));
 
-    const result = await window.bcwTerminal.listDirectory(directoryPath);
+    const result = await window.bcwTerminal.listDirectory(directoryPath, options?.sessionId);
 
     setFileTree((current) => {
       const nextLoading = { ...current.loadingPaths };
@@ -1151,7 +1161,9 @@ export function TerminalPage() {
         rootPath: options?.resetRoot ? result.path : current.rootPath || result.path,
       };
     });
-  }, []);
+    },
+    [],
+  );
 
   const toggleFileTreeDirectory = (directoryPath: string) => {
     const isExpanded = Boolean(fileTree.expandedPaths[directoryPath]);
@@ -1164,13 +1176,13 @@ export function TerminalPage() {
     }));
 
     if (!isExpanded && !fileTree.childrenByPath[directoryPath]) {
-      void loadFileTreeDirectory(directoryPath);
+      void loadFileTreeDirectory(directoryPath, { sessionId: activeSession?.id });
     }
   };
 
   const refreshFileTree = () => {
     if (activeSession?.cwd && isFileExplorerExpanded) {
-      void loadFileTreeDirectory(activeSession.cwd, { resetRoot: true });
+      void loadFileTreeDirectory(activeSession.cwd, { resetRoot: true, sessionId: activeSession.id });
     }
   };
 
@@ -1187,8 +1199,20 @@ export function TerminalPage() {
       return;
     }
 
-    void loadFileTreeDirectory(cwd, { resetRoot: true });
-  }, [activeSession?.cwd, loadFileTreeDirectory, settings.fileExplorerExpanded, settings.showFileExplorer]);
+    // Remote (SSH) trees are driven by the directory-update push that fires when
+    // the user runs `ls`; don't poll them here (it would inject a second `ls`).
+    if (cwd.startsWith('remote:')) {
+      return;
+    }
+
+    void loadFileTreeDirectory(cwd, { resetRoot: true, sessionId: activeSession?.id });
+  }, [
+    activeSession?.cwd,
+    activeSession?.id,
+    loadFileTreeDirectory,
+    settings.fileExplorerExpanded,
+    settings.showFileExplorer,
+  ]);
 
   const refreshCommandVariables = () => {
     void window.bcwTerminal
@@ -1298,6 +1322,11 @@ export function TerminalPage() {
       const previous = previousSessionCommandsRef.current[session.id] ?? '';
       if (session.lastCommand && session.lastCommand !== previous) {
         appendCommandHistory(session.lastCommand, session.id);
+        // When the user lists a directory on a remote SSH host, refresh the file
+        // explorer from the live shell. Main no-ops this for local shells.
+        if (/^\s*(?:ls|ll|la|l|dir)(\s|$)/.test(session.lastCommand)) {
+          void window.bcwTerminal.refreshRemoteExplorer(session.id);
+        }
       }
       previousSessionCommandsRef.current[session.id] = session.lastCommand;
     }
@@ -1333,6 +1362,7 @@ export function TerminalPage() {
   const quotePowerShellLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
   const isWslPath = (value: string) => value.startsWith('wsl:');
   const fromWslPath = (value: string) => (isWslPath(value) ? value.slice(4) : value);
+  const isRemotePath = (value: string) => value.startsWith('remote:');
   const quoteShellLiteral = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
   const toWslShellPathExpression = (value: string) => {
     const wslPath = fromWslPath(value);
@@ -1345,6 +1375,32 @@ export function TerminalPage() {
     return quoteShellLiteral(wslPath);
   };
 
+  // Connection type for the current session, derived from its cwd prefix.
+  const connectionInfo = (() => {
+    const cwd = activeSession?.cwd ?? '';
+    if (isRemotePath(cwd)) {
+      return { label: 'SSH', tooltip: text.connectionTooltipSsh, color: 'warning' as const };
+    }
+    if (isWslPath(cwd)) {
+      return { label: 'WSL', tooltip: text.connectionTooltipWsl, color: 'info' as const };
+    }
+    return { label: 'LOCAL', tooltip: text.connectionTooltipLocal, color: 'default' as const };
+  })();
+
+  // Human-friendly label for the explorer root: strip the wsl: prefix and turn
+  // "remote:host:/path" into "host:/path".
+  const formatDisplayPath = (value: string) => {
+    if (isRemotePath(value)) {
+      return value.slice('remote:'.length);
+    }
+    if (isWslPath(value)) {
+      return fromWslPath(value);
+    }
+    return value;
+  };
+
+  // Remote (SSH) entries don't run terminal commands on click, so these only
+  // handle local Windows / WSL paths.
   const createChangeDirectoryCommand = (directoryPath: string) =>
     isWslPath(directoryPath)
       ? `cd ${toWslShellPathExpression(directoryPath)}`
@@ -1730,6 +1786,43 @@ export function TerminalPage() {
     });
   }, [handleSaveTerminalOutput]);
 
+  // Directory updates pushed from the main process: a `ls` in the live shell, or
+  // a cleared tree when entering/leaving a remote SSH host.
+  useEffect(() => {
+    return window.bcwTerminal.onDirectoryUpdate((event) => {
+      if (event.sessionId !== activeSessionId) {
+        return;
+      }
+
+      if (event.cleared) {
+        setFileTree({
+          childrenByPath: {},
+          errorsByPath: {},
+          expandedPaths: {},
+          loadingPaths: {},
+          pendingRootPath: '',
+          rootPath: '',
+        });
+        return;
+      }
+
+      if (!event.rootPath || !event.entries) {
+        return;
+      }
+
+      const rootPath = event.rootPath;
+      const entries = event.entries;
+      setFileTree({
+        childrenByPath: { [rootPath]: entries },
+        errorsByPath: {},
+        expandedPaths: {},
+        loadingPaths: {},
+        pendingRootPath: '',
+        rootPath,
+      });
+    });
+  }, [activeSessionId]);
+
   const handleSendCtrlC = () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
@@ -1976,9 +2069,13 @@ export function TerminalPage() {
     }
 
     if (!isLoading && entries.length === 0) {
+      // On a remote (SSH) session whose root is still empty, guide the user to run
+      // `ls`. Expanded subdirectories that are genuinely empty keep "No files".
+      const isRemoteRoot = depth === 0 && isRemotePath(activeSession?.cwd ?? '');
+      const emptyMessage = isRemoteRoot ? text.fileTreeEmptyRemote : text.fileTreeEmpty;
       return (
         <Typography className="terminal-file-tree-message" sx={{ pl: `${depth * 14 + 10}px` }}>
-          {text.fileTreeEmpty}
+          {emptyMessage}
         </Typography>
       );
     }
@@ -1993,16 +2090,24 @@ export function TerminalPage() {
           <button
             className={`terminal-file-tree-row${isDirectory ? ' is-directory' : ''}`}
             style={{ paddingLeft: `${depth * 14 + 8}px` }}
-            title={isDirectory ? entry.path : `${text.fileViewInTerminal}: ${entry.path}`}
+            title={
+              isDirectory || isRemotePath(entry.path)
+                ? formatDisplayPath(entry.path)
+                : `${text.fileViewInTerminal}: ${formatDisplayPath(entry.path)}`
+            }
             type="button"
             onClick={() => {
               if (isDirectory) {
                 toggleFileTreeDirectory(entry.path);
-                void runCommand(createChangeDirectoryCommand(entry.path), { clearCurrentLine: true });
+                // On a remote (SSH) host we only expand the tree; sending `cd`
+                // to the terminal would mangle the prompt, so skip it.
+                if (!isRemotePath(entry.path)) {
+                  void runCommand(createChangeDirectoryCommand(entry.path), { clearCurrentLine: true });
+                }
               }
             }}
             onContextMenu={(event) => {
-              if (isDirectory) {
+              if (isDirectory || isRemotePath(entry.path)) {
                 return;
               }
 
@@ -2391,7 +2496,16 @@ export function TerminalPage() {
           <Box component="aside" className="terminal-file-sidebar" aria-label="Files">
             <Stack direction="row" alignItems="center" justifyContent="space-between" className="terminal-sidebar-header">
               <Typography className="terminal-sidebar-title">{text.fileExplorer}</Typography>
-              <Stack direction="row" spacing={0.5}>
+              <Stack direction="row" alignItems="center" spacing={0.5}>
+                <Tooltip title={connectionInfo.tooltip}>
+                  <Chip
+                    className="terminal-connection-chip"
+                    label={connectionInfo.label}
+                    color={connectionInfo.color}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Tooltip>
                 <Tooltip title={text.refreshFileTree}>
                   <IconButton aria-label="Refresh file tree" color="primary" size="small" onClick={refreshFileTree}>
                     <RefreshIcon fontSize="small" />
@@ -2405,7 +2519,7 @@ export function TerminalPage() {
               </Stack>
             </Stack>
             <Typography className="terminal-file-root" title={fileTree.rootPath}>
-              {fileTree.pendingRootPath || fileTree.rootPath}
+              {formatDisplayPath(fileTree.pendingRootPath || fileTree.rootPath)}
             </Typography>
             <Box className="terminal-file-tree">{renderFileTreeEntries(fileTree.rootPath)}</Box>
           </Box>
