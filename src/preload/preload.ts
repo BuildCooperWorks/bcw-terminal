@@ -88,6 +88,12 @@ const terminalApi = {
 
     return () => ipcRenderer.removeListener('terminal:exit', listener);
   },
+  onSaveTerminalOutputRequest: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('terminal:save-output-request', listener);
+
+    return () => ipcRenderer.removeListener('terminal:save-output-request', listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('bcwTerminal', terminalApi);

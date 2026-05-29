@@ -29,6 +29,7 @@ if (isDevMode) {
 const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
+const TERMINAL_SAVE_OUTPUT_REQUEST = 'terminal:save-output-request';
 const APP_UPDATE_STATUS = 'app:update-status';
 const execFileAsync = promisify(execFile);
 const WSL_PATH_PREFIX = 'wsl:';
@@ -161,6 +162,7 @@ const MENU_TEXT = {
     help: 'Help',
     reload: 'Reload',
     resetZoom: 'Reset Zoom',
+    saveTerminalOutput: 'Save Terminal Output',
     toggleDevTools: 'Toggle Developer Tools',
     toggleFullScreen: 'Toggle Full Screen',
     view: 'View',
@@ -168,6 +170,7 @@ const MENU_TEXT = {
     zoomOut: 'Zoom Out',
   },
   ja: {
+    saveTerminalOutput: 'ターミナル出力を保存',
     close: '閉じる',
     docs: 'プロジェクトページを開く',
     file: 'ファイル',
@@ -893,7 +896,14 @@ function updateApplicationMenu(locale: AppLocale) {
   const template: MenuItemConstructorOptions[] = [
     {
       label: text.file,
-      submenu: [{ label: text.close, role: 'close' }],
+      submenu: [
+        {
+          label: text.saveTerminalOutput,
+          click: () => sendToRenderer(TERMINAL_SAVE_OUTPUT_REQUEST, undefined),
+        },
+        { type: 'separator' },
+        { label: text.close, role: 'close' },
+      ],
     },
     {
       label: text.view,

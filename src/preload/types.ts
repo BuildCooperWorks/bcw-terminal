@@ -115,6 +115,7 @@ export type TerminalApi = {
   onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
   onCwdChange: (callback: (event: TerminalCwdEvent) => void) => () => void;
   onExit: (callback: (event: TerminalExitEvent) => void) => () => void;
+  onSaveTerminalOutputRequest: (callback: () => void) => () => void;
 };
 
 export type TerminalSessionSnapshot = {

@@ -21,7 +21,6 @@ import LanIcon from '@mui/icons-material/Lan';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -293,7 +292,6 @@ const LOCALE_TEXT = {
       'Smart App Control is ON. Local CLI launch can be blocked. Turn it OFF and reboot if commands fail.',
     sessions: 'Sessions',
     settings: 'Settings',
-    openCommandManagerTooltip: 'Open command manager to edit command groups.',
     closeDialogTooltip: 'Close this dialog.',
     createSessionTooltip: 'Start a new PowerShell session.',
     checkUpdates: 'Check updates',
@@ -440,7 +438,6 @@ const LOCALE_TEXT = {
       'Smart App Control が ON のため、ローカルCLI起動がブロックされる場合があります。失敗する場合は OFF にして再起動してください。',
     sessions: 'セッション',
     settings: '設定',
-    openCommandManagerTooltip: 'コマンド管理画面を開きます。',
     closeDialogTooltip: 'このダイアログを閉じます。',
     createSessionTooltip: '新しい PowerShell セッションを起動します。',
     checkUpdates: '更新を確認',
@@ -1727,6 +1724,12 @@ export function TerminalPage() {
     });
   };
 
+  useEffect(() => {
+    return window.bcwTerminal.onSaveTerminalOutputRequest(() => {
+      void handleSaveTerminalOutput();
+    });
+  }, [handleSaveTerminalOutput]);
+
   const handleSendCtrlC = () => {
     if (!activeSessionId || !activeSession || activeSession.status === 'stopped') {
       setEditMenuAnchor(null);
@@ -2284,12 +2287,6 @@ export function TerminalPage() {
                 </ListItemIcon>
                 <ListItemText primary={text.pasteClipboard} />
               </MenuItem>
-              <MenuItem onClick={() => void handleSaveTerminalOutput()}>
-                <ListItemIcon>
-                  <SaveAltIcon fontSize="small" />
-                </ListItemIcon>
-                <ListItemText primary={text.saveTerminalOutput} secondary={text.saveTerminalOutputDescription} />
-              </MenuItem>
               <MenuItem onClick={handleSendCtrlC}>
                 <ListItemIcon>
                   <CloseIcon fontSize="small" />
@@ -2573,18 +2570,14 @@ export function TerminalPage() {
                 </Button>
               </span>
             </Tooltip>
-            <Typography className="terminal-settings-description">
-              {text.variableManagerDescription} {text.sequenceManagerDescription}
-            </Typography>
 
-            <Tooltip title={text.openCommandManagerTooltip}>
+            <Tooltip title={text.commandManagerDescription}>
               <span>
                 <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setCommandManagerOpen(true)}>
                   {text.commandManager}
                 </Button>
               </span>
             </Tooltip>
-            <Typography className="terminal-settings-description">{text.commandManagerDescription}</Typography>
 
             <Divider />
 
