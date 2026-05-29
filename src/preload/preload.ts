@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
   AppUpdateState,
   CommandVariableInput,
+  DirectoryListing,
   TerminalCwdEvent,
   TerminalExitEvent,
   TerminalOutputEvent,
@@ -39,6 +40,8 @@ const terminalApi = {
   },
   loadCommandConfigFile: () => ipcRenderer.invoke('command-config:load-file'),
   listCommandVariables: () => ipcRenderer.invoke('command-variables:list'),
+  listDirectory: (directoryPath: string): Promise<DirectoryListing> =>
+    ipcRenderer.invoke('filesystem:list-directory', directoryPath),
   readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
   saveCommandConfigFile: (content: string, currentPath?: string) =>
     ipcRenderer.invoke('command-config:save-file', { content, currentPath }),

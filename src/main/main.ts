@@ -98,6 +98,12 @@ type TerminalSequenceStep = {
   delayMs?: number;
 };
 
+type FileSystemEntry = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file';
+};
+
 let mainWindow: BrowserWindow | null = null;
 let sessionCounter = 0;
 let appLocale: AppLocale = 'ja';
@@ -512,6 +518,39 @@ function getReadableAutoUpdateError(error: Error) {
   return singleLine.length > 280 ? `${singleLine.slice(0, 277)}...` : singleLine;
 }
 
+async function listDirectory(directoryPath: string) {
+  const targetPath = typeof directoryPath === 'string' && directoryPath.trim() ? directoryPath : getDefaultStartupCwd();
+
+  try {
+    const entries = await fs.promises.readdir(targetPath, { withFileTypes: true });
+    const visibleEntries = entries
+      .filter((entry) => entry.isDirectory() || entry.isFile())
+      .map<FileSystemEntry>((entry) => ({
+        name: entry.name,
+        path: path.join(targetPath, entry.name),
+        type: entry.isDirectory() ? 'directory' : 'file',
+      }))
+      .sort((left, right) => {
+        if (left.type !== right.type) {
+          return left.type === 'directory' ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+      })
+      .slice(0, 500);
+
+    return {
+      entries: visibleEntries,
+      path: targetPath,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      error: error instanceof Error ? error.message : String(error),
+      path: targetPath,
+    };
+  }
+}
+
 function setupAutoUpdater() {
   if (!isAutoUpdateSupported()) {
     setAppUpdateState({
@@ -733,6 +772,7 @@ function createSession() {
 }
 
 ipcMain.handle('terminal:create-session', () => createSession());
+ipcMain.handle('filesystem:list-directory', (_event, directoryPath: string) => listDirectory(directoryPath));
 
 ipcMain.on('terminal:data', (_event, payload: { sessionId: string; data: string }) => {
   sessions.get(payload.sessionId)?.shell?.write(payload.data);

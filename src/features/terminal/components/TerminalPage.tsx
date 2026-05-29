@@ -1,7 +1,9 @@
 ﻿import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback } from 'react';
 import AddIcon from '@mui/icons-material/Add';
 import type { ReactNode } from 'react';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ChatIcon from '@mui/icons-material/Chat';
 import ClearAllIcon from '@mui/icons-material/ClearAll';
 import CloseIcon from '@mui/icons-material/Close';
@@ -9,13 +11,16 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ContentPasteIcon from '@mui/icons-material/ContentPaste';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import EditIcon from '@mui/icons-material/Edit';
+import FolderIcon from '@mui/icons-material/Folder';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import GitHubIcon from '@mui/icons-material/GitHub';
 import HistoryIcon from '@mui/icons-material/History';
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import KeyIcon from '@mui/icons-material/Key';
 import LanIcon from '@mui/icons-material/Lan';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import SaveAltIcon from '@mui/icons-material/SaveAlt';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -45,7 +50,12 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { CommandVariableKind, CommandVariableSnapshot, TerminalSequenceStep } from '../../../preload/types';
+import type {
+  CommandVariableKind,
+  CommandVariableSnapshot,
+  FileSystemEntry,
+  TerminalSequenceStep,
+} from '../../../preload/types';
 import { useBcwTerminal, type TerminalSessionView, type TerminalSettings } from '../hooks/useBcwTerminal';
 import './terminal.css';
 
@@ -96,6 +106,14 @@ type CommandHistoryItem = {
   sessionId: string;
 };
 
+type FileTreeState = {
+  childrenByPath: Record<string, FileSystemEntry[]>;
+  errorsByPath: Record<string, string>;
+  expandedPaths: Record<string, boolean>;
+  loadingPaths: Record<string, boolean>;
+  rootPath: string;
+};
+
 type CommandConfigDocumentGroup = {
   id: string;
   title: string;
@@ -117,6 +135,8 @@ type PageSettings = TerminalSettings & {
   operationSequences: OperationSequence[];
   groupOrder: string[];
   commandConfigPath?: string;
+  fileExplorerExpanded: boolean;
+  showFileExplorer: boolean;
   showSidebar: boolean;
   hideSidebarWhenSingleSession: boolean;
   commandVisibility: CommandButtonVisibility;
@@ -176,6 +196,12 @@ const LOCALE_TEXT = {
     dropdownItemLabel: 'Item label',
     editButton: 'Edit',
     editTooltip: 'Copy / paste / save / interrupt / clear',
+    collapseFileExplorer: 'Collapse file explorer',
+    expandFileExplorer: 'Expand file explorer',
+    fileExplorer: 'Files',
+    fileTreeEmpty: 'No files',
+    fileTreeError: 'Cannot read folder',
+    fileTreeLoading: 'Loading...',
     fontFamily: 'Font family',
     fontSize: 'Font size',
     groupTarget: 'Target group',
@@ -231,6 +257,7 @@ const LOCALE_TEXT = {
     resetSettings: 'Reset settings',
     resetSettingsTooltip:
       'Reset all settings to defaults: language, fonts, terminal colors, sidebar options, button visibility, and command groups.',
+    refreshFileTree: 'Refresh file tree',
     runAgain: 'Run',
     variableDeleteTooltip: 'Delete this variable.',
     variableDescription: 'Description',
@@ -267,6 +294,7 @@ const LOCALE_TEXT = {
     terminalTextColor: 'Terminal text color',
     addItemTooltip: 'Add a new command item to the selected group.',
     showSessionSidebar: 'Show session sidebar',
+    showFileExplorer: 'Show file explorer',
     sidebarAutoHidden: 'Sidebar hidden in single-session mode',
     sidebarCollapse: 'Collapse sidebar',
     sidebarExpand: 'Expand sidebar',
@@ -308,6 +336,12 @@ const LOCALE_TEXT = {
     dropdownItemLabel: '項目名',
     editButton: '編集',
     editTooltip: 'コピー / 貼り付け / 保存 / 割り込み / クリア',
+    collapseFileExplorer: 'ファイルサイドバーを縮小',
+    expandFileExplorer: 'ファイルサイドバーを展開',
+    fileExplorer: 'ファイル',
+    fileTreeEmpty: 'ファイルはありません',
+    fileTreeError: 'フォルダーを読めません',
+    fileTreeLoading: '読み込み中...',
     fontFamily: 'フォント',
     fontSize: 'フォントサイズ',
     groupTarget: '編集対象グループ',
@@ -363,6 +397,7 @@ const LOCALE_TEXT = {
     resetSettings: '設定をリセット',
     resetSettingsTooltip:
       '表示言語・フォント・ターミナル色設定・サイドバー設定・ボタン表示・コマンド設定を初期値に戻します。',
+    refreshFileTree: 'ファイルツリーを更新',
     runAgain: '再実行',
     variableDeleteTooltip: 'この変数を削除します。',
     variableDescription: '説明',
@@ -399,6 +434,7 @@ const LOCALE_TEXT = {
     terminalTextColor: 'ターミナル文字色',
     addItemTooltip: '選択中グループにコマンド項目を追加します。',
     showSessionSidebar: 'セッションサイドバーを表示',
+    showFileExplorer: 'ファイルサイドバーを表示',
     sidebarAutoHidden: '単一セッションではサイドバーを自動非表示',
     sidebarCollapse: 'サイドバーを折りたたむ',
     sidebarExpand: 'サイドバーを展開',
@@ -509,6 +545,8 @@ const DEFAULT_SETTINGS: PageSettings = {
   lineHeight: 1.35,
   terminalBackgroundColor: DEFAULT_TERMINAL_BACKGROUND_COLOR,
   terminalTextColor: DEFAULT_TERMINAL_TEXT_COLOR,
+  fileExplorerExpanded: false,
+  showFileExplorer: true,
   showSidebar: true,
   hideSidebarWhenSingleSession: true,
   commandVisibility: { ...DEFAULT_COMMAND_BUTTON_VISIBILITY },
@@ -776,6 +814,8 @@ function applyCommandConfigDocument(
   next.terminalBackgroundColor = currentSettings.terminalBackgroundColor;
   next.terminalTextColor = currentSettings.terminalTextColor;
   next.confirmStop = currentSettings.confirmStop;
+  next.fileExplorerExpanded = currentSettings.fileExplorerExpanded;
+  next.showFileExplorer = currentSettings.showFileExplorer;
   next.showSidebar = currentSettings.showSidebar;
   next.hideSidebarWhenSingleSession = currentSettings.hideSidebarWhenSingleSession;
   next.alwaysOnTop = currentSettings.alwaysOnTop;
@@ -953,6 +993,13 @@ export function TerminalPage() {
   const [variableMessage, setVariableMessage] = useState('');
   const [sequenceTargetId, setSequenceTargetId] = useState('');
   const [sequenceMessage, setSequenceMessage] = useState('');
+  const [fileTree, setFileTree] = useState<FileTreeState>({
+    childrenByPath: {},
+    errorsByPath: {},
+    expandedPaths: {},
+    loadingPaths: {},
+    rootPath: '',
+  });
 
   const [managerTargetKey, setManagerTargetKey] = useState<string>('claude');
   const [newItemLabel, setNewItemLabel] = useState('');
@@ -996,6 +1043,9 @@ export function TerminalPage() {
     useBcwTerminal(terminalSettings);
 
   const text = LOCALE_TEXT[settings.locale];
+  const canToggleFileExplorer = settings.showFileExplorer && Boolean(activeSession?.cwd);
+  const shouldShowFileExplorer = canToggleFileExplorer && settings.fileExplorerExpanded;
+  const isFileExplorerExpanded = shouldShowFileExplorer;
   const shouldShowSidebar =
     settings.showSidebar && (!settings.hideSidebarWhenSingleSession || sessions.length > 1);
 
@@ -1035,7 +1085,7 @@ export function TerminalPage() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(fit);
     return () => window.cancelAnimationFrame(frame);
-  }, [fit]);
+  }, [fit, isFileExplorerExpanded, shouldShowFileExplorer, shouldShowSidebar]);
 
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -1048,6 +1098,87 @@ export function TerminalPage() {
   useEffect(() => {
     void window.bcwTerminal.setLocale(settings.locale);
   }, [settings.locale]);
+
+  const loadFileTreeDirectory = useCallback(async (directoryPath: string, options?: { resetRoot?: boolean }) => {
+    if (!directoryPath) {
+      return;
+    }
+
+    setFileTree((current) => ({
+      ...current,
+      rootPath: options?.resetRoot ? directoryPath : current.rootPath || directoryPath,
+      loadingPaths: { ...current.loadingPaths, [directoryPath]: true },
+    }));
+
+    const result = await window.bcwTerminal.listDirectory(directoryPath);
+
+    setFileTree((current) => {
+      const nextLoading = { ...current.loadingPaths };
+      delete nextLoading[directoryPath];
+
+      const nextErrors = { ...current.errorsByPath };
+      if (result.error) {
+        nextErrors[directoryPath] = result.error;
+      } else {
+        delete nextErrors[directoryPath];
+      }
+
+      return {
+        ...current,
+        childrenByPath: {
+          ...current.childrenByPath,
+          [directoryPath]: result.entries,
+        },
+        errorsByPath: nextErrors,
+        loadingPaths: nextLoading,
+        rootPath: options?.resetRoot ? result.path : current.rootPath || result.path,
+      };
+    });
+  }, []);
+
+  const toggleFileTreeDirectory = (directoryPath: string) => {
+    const isExpanded = Boolean(fileTree.expandedPaths[directoryPath]);
+    setFileTree((current) => ({
+      ...current,
+      expandedPaths: {
+        ...current.expandedPaths,
+        [directoryPath]: !isExpanded,
+      },
+    }));
+
+    if (!isExpanded && !fileTree.childrenByPath[directoryPath]) {
+      void loadFileTreeDirectory(directoryPath);
+    }
+  };
+
+  const refreshFileTree = () => {
+    if (activeSession?.cwd && isFileExplorerExpanded) {
+      void loadFileTreeDirectory(activeSession.cwd, { resetRoot: true });
+    }
+  };
+
+  const toggleFileExplorer = () => {
+    setSettings((current) => ({
+      ...current,
+      fileExplorerExpanded: !current.fileExplorerExpanded,
+    }));
+  };
+
+  useEffect(() => {
+    const cwd = activeSession?.cwd;
+    if (!cwd || !settings.showFileExplorer || !settings.fileExplorerExpanded) {
+      return;
+    }
+
+    setFileTree({
+      childrenByPath: {},
+      errorsByPath: {},
+      expandedPaths: {},
+      loadingPaths: {},
+      rootPath: cwd,
+    });
+    void loadFileTreeDirectory(cwd, { resetRoot: true });
+  }, [activeSession?.cwd, loadFileTreeDirectory, settings.fileExplorerExpanded, settings.showFileExplorer]);
 
   const refreshCommandVariables = () => {
     void window.bcwTerminal
@@ -1756,6 +1887,81 @@ export function TerminalPage() {
       </MenuItem>
     ));
 
+  const renderFileTreeEntries = (directoryPath: string, depth = 0): ReactNode => {
+    const entries = fileTree.childrenByPath[directoryPath] ?? [];
+    const isLoading = Boolean(fileTree.loadingPaths[directoryPath]);
+    const error = fileTree.errorsByPath[directoryPath];
+
+    if (error) {
+      return (
+        <Typography className="terminal-file-tree-message" sx={{ pl: `${depth * 14 + 10}px` }}>
+          {text.fileTreeError}: {error}
+        </Typography>
+      );
+    }
+
+    if (isLoading && entries.length === 0) {
+      return (
+        <Typography className="terminal-file-tree-message" sx={{ pl: `${depth * 14 + 10}px` }}>
+          {text.fileTreeLoading}
+        </Typography>
+      );
+    }
+
+    if (!isLoading && entries.length === 0) {
+      return (
+        <Typography className="terminal-file-tree-message" sx={{ pl: `${depth * 14 + 10}px` }}>
+          {text.fileTreeEmpty}
+        </Typography>
+      );
+    }
+
+    return entries.map((entry) => {
+      const isDirectory = entry.type === 'directory';
+      const isExpanded = Boolean(fileTree.expandedPaths[entry.path]);
+      const isChildLoading = Boolean(fileTree.loadingPaths[entry.path]);
+
+      return (
+        <Box key={entry.path} className="terminal-file-tree-node">
+          <button
+            className={`terminal-file-tree-row${isDirectory ? ' is-directory' : ''}`}
+            style={{ paddingLeft: `${depth * 14 + 8}px` }}
+            title={entry.path}
+            type="button"
+            onClick={() => {
+              if (isDirectory) {
+                toggleFileTreeDirectory(entry.path);
+              }
+            }}
+          >
+            {isDirectory ? (
+              <ChevronRightIcon className={`terminal-file-tree-chevron${isExpanded ? ' is-expanded' : ''}`} />
+            ) : (
+              <span className="terminal-file-tree-spacer" />
+            )}
+            {isDirectory ? (
+              <FolderIcon className="terminal-file-tree-icon is-directory" />
+            ) : (
+              <InsertDriveFileIcon className="terminal-file-tree-icon" />
+            )}
+            <span className="terminal-file-tree-name">{entry.name}</span>
+          </button>
+          {isDirectory && isExpanded ? (
+            <Box className="terminal-file-tree-children">
+              {isChildLoading ? (
+                <Typography className="terminal-file-tree-message" sx={{ pl: `${(depth + 1) * 14 + 10}px` }}>
+                  {text.fileTreeLoading}
+                </Typography>
+              ) : (
+                renderFileTreeEntries(entry.path, depth + 1)
+              )}
+            </Box>
+          ) : null}
+        </Box>
+      );
+    });
+  };
+
   return (
     <Box
       className="terminal-page"
@@ -1779,6 +1985,19 @@ export function TerminalPage() {
           >
             <AddIcon />
           </IconButton>
+        </Tooltip>
+        <Tooltip title={isFileExplorerExpanded ? text.collapseFileExplorer : text.expandFileExplorer}>
+          <span>
+            <IconButton
+              aria-label={isFileExplorerExpanded ? 'Collapse file explorer' : 'Expand file explorer'}
+              className="terminal-toolbar-icon"
+              color="primary"
+              disabled={!canToggleFileExplorer}
+              onClick={toggleFileExplorer}
+            >
+              <FolderIcon />
+            </IconButton>
+          </span>
         </Tooltip>
 
         {orderedShortcutGroupIds.map((groupId) => {
@@ -2086,7 +2305,35 @@ export function TerminalPage() {
         </Tooltip>
       </Box>
 
-      <Box className={`terminal-workspace${shouldShowSidebar ? '' : ' is-sidebar-hidden'}`}>
+      <Box
+        className={`terminal-workspace${shouldShowFileExplorer ? ' has-file-explorer' : ''}${
+          shouldShowSidebar ? '' : ' is-sidebar-hidden'
+        }`}
+      >
+        {shouldShowFileExplorer ? (
+          <Box component="aside" className="terminal-file-sidebar" aria-label="Files">
+            <Stack direction="row" alignItems="center" justifyContent="space-between" className="terminal-sidebar-header">
+              <Typography className="terminal-sidebar-title">{text.fileExplorer}</Typography>
+              <Stack direction="row" spacing={0.5}>
+                <Tooltip title={text.refreshFileTree}>
+                  <IconButton aria-label="Refresh file tree" color="primary" size="small" onClick={refreshFileTree}>
+                    <RefreshIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title={text.collapseFileExplorer}>
+                  <IconButton aria-label="Collapse file explorer" color="primary" size="small" onClick={toggleFileExplorer}>
+                    <ChevronRightIcon className="terminal-file-collapse-icon is-expanded" fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Stack>
+            <Typography className="terminal-file-root" title={fileTree.rootPath}>
+              {fileTree.rootPath}
+            </Typography>
+            <Box className="terminal-file-tree">{renderFileTreeEntries(fileTree.rootPath)}</Box>
+          </Box>
+        ) : null}
+
         <Box className="terminal-shell">
           <Box ref={hostRef} className="terminal-host" onContextMenu={(event) => void handleTerminalContextMenu(event)} />
         </Box>
@@ -2261,6 +2508,17 @@ export function TerminalPage() {
 
             <Divider />
 
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.showFileExplorer}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, showFileExplorer: event.target.checked }))
+                  }
+                />
+              }
+              label={text.showFileExplorer}
+            />
             <FormControlLabel
               control={
                 <Switch

@@ -32,6 +32,19 @@ export type TerminalSequenceStep = {
   waitFor?: string;
   delayMs?: number;
 };
+
+export type FileSystemEntry = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file';
+};
+
+export type DirectoryListing = {
+  entries: FileSystemEntry[];
+  error?: string;
+  path: string;
+};
+
 export type WindowStateSnapshot = {
   alwaysOnTop: boolean;
 };
@@ -74,6 +87,7 @@ export type TerminalApi = {
   getAppUpdateState: () => Promise<AppUpdateState>;
   listCommandVariables: () => Promise<CommandVariableSnapshot[]>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
+  listDirectory: (directoryPath: string) => Promise<DirectoryListing>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;
   readClipboardText: () => Promise<string>;
