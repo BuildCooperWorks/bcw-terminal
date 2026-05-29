@@ -153,10 +153,6 @@ body {
   background: var(--bcw-ui-bg);
 }
 
-.terminal-file-collapse-icon.is-expanded {
-  transform: rotate(180deg);
-}
-
 .terminal-sidebar-header {
   min-height: 34px;
   margin-bottom: 10px;

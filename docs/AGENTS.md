@@ -365,3 +365,15 @@ src/
 - コマンド管理はツールバーから外し、設定画面内の低頻度操作として整理。`変数 / 操作シーケンス` は `コマンド管理` より上へ配置。
 - フォントサイズ、行間、フォント名、ターミナル色などの表示設定は設定画面の下側へ移動。
 - Release workflow の YAML アセット対象を `release/latest.yml` に限定し、不要な debug YAML が Release に混入しないようにした。
+
+## 37. 2026-05-29 Additional Update (File Explorer Sidebar)
+- Added an in-app file explorer sidebar opened from the toolbar folder button. It is closed by default and does not read filesystem contents while closed.
+- The sidebar supports local Windows directories through Electron main-process filesystem APIs.
+- WSL prompts are detected as `wsl:<path>` roots. Directory listings are retrieved through `wsl.exe --exec /bin/sh`, and WSL file viewing uses Linux shell commands.
+- Entering WSL from `/mnt/c/Users/<user>` automatically runs `cd ~` once so the file explorer starts from the Linux home directory instead of the mounted Windows home.
+- Directory clicks change the active terminal cwd: PowerShell uses `Set-Location -LiteralPath`; WSL uses `cd`.
+- File right-click viewing sends `Get-Content -LiteralPath ... | more` on PowerShell and `cat -- ... | more` on WSL.
+- Binary-looking files are skipped before viewing, with a Snackbar explaining the reason.
+- Prompt detection updates cwd only when terminal output ends with a real prompt, preventing `more` output from changing the sidebar path.
+- Command history replay clears the active input line before sending. PowerShell uses Escape; WSL/bash uses Ctrl+U.
+- History items can be deleted by right-clicking them without confirmation.

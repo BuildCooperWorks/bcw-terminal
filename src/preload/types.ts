@@ -45,6 +45,11 @@ export type DirectoryListing = {
   path: string;
 };
 
+export type FileViewCheck = {
+  reason?: string;
+  viewable: boolean;
+};
+
 export type WindowStateSnapshot = {
   alwaysOnTop: boolean;
 };
@@ -74,7 +79,11 @@ export type TerminalApi = {
   checkForAppUpdate: () => Promise<{ started: boolean; supported: boolean }>;
   createSession: () => Promise<TerminalSessionSnapshot>;
   deleteCommandVariable: (id: string) => Promise<{ deleted: boolean }>;
-  executeCommand: (sessionId: string, command: string) => Promise<{ executed: boolean; missingVariables: string[] }>;
+  executeCommand: (
+    sessionId: string,
+    command: string,
+    options?: { clearCurrentLine?: boolean },
+  ) => Promise<{ executed: boolean; missingVariables: string[] }>;
   runSequence: (
     sessionId: string,
     steps: TerminalSequenceStep[],
@@ -87,6 +96,7 @@ export type TerminalApi = {
   getAppUpdateState: () => Promise<AppUpdateState>;
   listCommandVariables: () => Promise<CommandVariableSnapshot[]>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
+  canViewFileInTerminal: (filePath: string) => Promise<FileViewCheck>;
   listDirectory: (directoryPath: string) => Promise<DirectoryListing>;
   loadCommandConfigFile: () => Promise<CommandConfigFileResult>;
   getWindowState: () => Promise<WindowStateSnapshot>;

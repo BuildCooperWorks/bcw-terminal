@@ -42,6 +42,7 @@ import {
   Menu,
   MenuItem,
   Slider,
+  Snackbar,
   Stack,
   Switch,
   Tab,
@@ -112,6 +113,7 @@ type FileTreeState = {
   expandedPaths: Record<string, boolean>;
   loadingPaths: Record<string, boolean>;
   rootPath: string;
+  pendingRootPath: string;
 };
 
 type CommandConfigDocumentGroup = {
@@ -196,12 +198,18 @@ const LOCALE_TEXT = {
     dropdownItemLabel: 'Item label',
     editButton: 'Edit',
     editTooltip: 'Copy / paste / save / interrupt / clear',
-    collapseFileExplorer: 'Collapse file explorer',
+    closeFileExplorer: 'Close file explorer',
     expandFileExplorer: 'Expand file explorer',
     fileExplorer: 'Files',
     fileTreeEmpty: 'No files',
     fileTreeError: 'Cannot read folder',
     fileTreeLoading: 'Loading...',
+    fileViewFailed: 'Cannot view file.',
+    fileViewReasonBinary: 'Skipped viewing this file in the terminal because it appears to be binary.',
+    fileViewReasonInvalidPath: 'Invalid path.',
+    fileViewReasonNotFile: 'This item is not a file.',
+    fileViewSkippedBinary: 'Skipped viewing this file in the terminal because it appears to be binary.',
+    fileViewInTerminal: 'View file in terminal',
     fontFamily: 'Font family',
     fontSize: 'Font size',
     groupTarget: 'Target group',
@@ -211,6 +219,7 @@ const LOCALE_TEXT = {
     historyTooltip: 'Recent command history',
     clearHistory: 'Clear history',
     clearHistoryDescription: 'Remove saved command history.',
+    deleteHistoryItem: 'Delete this history item',
     jsonApply: 'Apply JSON',
     jsonApplyTooltip: 'Apply JSON content to command groups and overwrite current command configuration.',
     jsonEditor: 'JSON editor',
@@ -336,12 +345,18 @@ const LOCALE_TEXT = {
     dropdownItemLabel: '項目名',
     editButton: '編集',
     editTooltip: 'コピー / 貼り付け / 保存 / 割り込み / クリア',
-    collapseFileExplorer: 'ファイルサイドバーを縮小',
+    closeFileExplorer: 'ファイルサイドバーを閉じる',
     expandFileExplorer: 'ファイルサイドバーを展開',
     fileExplorer: 'ファイル',
     fileTreeEmpty: 'ファイルはありません',
     fileTreeError: 'フォルダーを読めません',
     fileTreeLoading: '読み込み中...',
+    fileViewFailed: 'ファイルを表示できません。',
+    fileViewReasonBinary: 'ターミナルでのファイル表示をスキップしました。バイナリファイルの可能性があります。',
+    fileViewReasonInvalidPath: 'パスが不正です。',
+    fileViewReasonNotFile: 'ファイルではありません。',
+    fileViewSkippedBinary: 'ターミナルでのファイル表示をスキップしました。バイナリファイルの可能性があります。',
+    fileViewInTerminal: 'ターミナルでファイルを表示',
     fontFamily: 'フォント',
     fontSize: 'フォントサイズ',
     groupTarget: '編集対象グループ',
@@ -351,6 +366,7 @@ const LOCALE_TEXT = {
     historyTooltip: '最近のコマンド履歴',
     clearHistory: '履歴をクリア',
     clearHistoryDescription: '保存済みのコマンド履歴を削除します。',
+    deleteHistoryItem: 'この履歴を削除',
     jsonApply: 'JSONを反映',
     jsonApplyTooltip: 'JSON内容を現在のコマンド設定へ反映して上書きします。',
     jsonEditor: 'JSON編集',
@@ -993,11 +1009,13 @@ export function TerminalPage() {
   const [variableMessage, setVariableMessage] = useState('');
   const [sequenceTargetId, setSequenceTargetId] = useState('');
   const [sequenceMessage, setSequenceMessage] = useState('');
+  const [fileViewMessage, setFileViewMessage] = useState('');
   const [fileTree, setFileTree] = useState<FileTreeState>({
     childrenByPath: {},
     errorsByPath: {},
     expandedPaths: {},
     loadingPaths: {},
+    pendingRootPath: '',
     rootPath: '',
   });
 
@@ -1106,7 +1124,8 @@ export function TerminalPage() {
 
     setFileTree((current) => ({
       ...current,
-      rootPath: options?.resetRoot ? directoryPath : current.rootPath || directoryPath,
+      pendingRootPath: options?.resetRoot ? directoryPath : current.pendingRootPath,
+      rootPath: current.rootPath || directoryPath,
       loadingPaths: { ...current.loadingPaths, [directoryPath]: true },
     }));
 
@@ -1131,6 +1150,7 @@ export function TerminalPage() {
         },
         errorsByPath: nextErrors,
         loadingPaths: nextLoading,
+        pendingRootPath: options?.resetRoot ? '' : current.pendingRootPath,
         rootPath: options?.resetRoot ? result.path : current.rootPath || result.path,
       };
     });
@@ -1170,13 +1190,6 @@ export function TerminalPage() {
       return;
     }
 
-    setFileTree({
-      childrenByPath: {},
-      errorsByPath: {},
-      expandedPaths: {},
-      loadingPaths: {},
-      rootPath: cwd,
-    });
     void loadFileTreeDirectory(cwd, { resetRoot: true });
   }, [activeSession?.cwd, loadFileTreeDirectory, settings.fileExplorerExpanded, settings.showFileExplorer]);
 
@@ -1320,7 +1333,58 @@ export function TerminalPage() {
     return normalizeCommandForExecution(command);
   };
 
-  const runCommand = async (command: string) => {
+  const quotePowerShellLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
+  const isWslPath = (value: string) => value.startsWith('wsl:');
+  const fromWslPath = (value: string) => (isWslPath(value) ? value.slice(4) : value);
+  const quoteShellLiteral = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
+  const toWslShellPathExpression = (value: string) => {
+    const wslPath = fromWslPath(value);
+    if (wslPath === '~') {
+      return '~';
+    }
+    if (wslPath.startsWith('~/')) {
+      return `~/${quoteShellLiteral(wslPath.slice(2))}`;
+    }
+    return quoteShellLiteral(wslPath);
+  };
+
+  const createChangeDirectoryCommand = (directoryPath: string) =>
+    isWslPath(directoryPath)
+      ? `cd ${toWslShellPathExpression(directoryPath)}`
+      : `Set-Location -LiteralPath ${quotePowerShellLiteral(directoryPath)}`;
+
+  const createFileViewCommand = (filePath: string) =>
+    isWslPath(filePath)
+      ? `cat -- ${toWslShellPathExpression(filePath)} | more`
+      : `Get-Content -LiteralPath ${quotePowerShellLiteral(filePath)} | more`;
+
+  const getFileViewFailureMessage = (reason?: string) => {
+    if (reason === 'binary-file') {
+      return text.fileViewReasonBinary;
+    }
+    if (reason === 'invalid-path') {
+      return text.fileViewReasonInvalidPath;
+    }
+    if (reason === 'not-file') {
+      return text.fileViewReasonNotFile;
+    }
+    if (reason) {
+      return `${text.fileViewFailed} ${reason}`;
+    }
+    return text.fileViewFailed;
+  };
+
+  const viewFileInTerminal = async (filePath: string) => {
+    const check = await window.bcwTerminal.canViewFileInTerminal(filePath);
+    if (!check.viewable) {
+      setFileViewMessage(getFileViewFailureMessage(check.reason));
+      return;
+    }
+
+    await runCommand(createFileViewCommand(filePath));
+  };
+
+  const runCommand = async (command: string, options?: { clearCurrentLine?: boolean }) => {
     if (!activeSessionId) {
       return;
     }
@@ -1330,7 +1394,7 @@ export function TerminalPage() {
       return;
     }
 
-    const result = await sendCommand(resolvedCommand);
+    const result = await sendCommand(resolvedCommand, options);
     if (!result.executed) {
       if (result.missingVariables.length > 0) {
         setVariableMessage(`${text.variableMissing} ${result.missingVariables.join(', ')}`);
@@ -1926,12 +1990,21 @@ export function TerminalPage() {
           <button
             className={`terminal-file-tree-row${isDirectory ? ' is-directory' : ''}`}
             style={{ paddingLeft: `${depth * 14 + 8}px` }}
-            title={entry.path}
+            title={isDirectory ? entry.path : `${text.fileViewInTerminal}: ${entry.path}`}
             type="button"
             onClick={() => {
               if (isDirectory) {
                 toggleFileTreeDirectory(entry.path);
+                void runCommand(createChangeDirectoryCommand(entry.path), { clearCurrentLine: true });
               }
+            }}
+            onContextMenu={(event) => {
+              if (isDirectory) {
+                return;
+              }
+
+              event.preventDefault();
+              void viewFileInTerminal(entry.path);
             }}
           >
             {isDirectory ? (
@@ -1962,6 +2035,10 @@ export function TerminalPage() {
     });
   };
 
+  const deleteCommandHistoryItem = (historyItemId: string) => {
+    setCommandHistory((current) => current.filter((item) => item.id !== historyItemId));
+  };
+
   return (
     <Box
       className="terminal-page"
@@ -1973,9 +2050,6 @@ export function TerminalPage() {
       }
     >
       <Box className="terminal-shortcuts">
-        <Box className="terminal-mark terminal-toolbar-mark">
-          <TerminalIcon fontSize="small" />
-        </Box>
         <Tooltip title={text.createSessionTooltip}>
           <IconButton
             aria-label="New PowerShell session"
@@ -1986,7 +2060,7 @@ export function TerminalPage() {
             <AddIcon />
           </IconButton>
         </Tooltip>
-        <Tooltip title={isFileExplorerExpanded ? text.collapseFileExplorer : text.expandFileExplorer}>
+        <Tooltip title={isFileExplorerExpanded ? text.closeFileExplorer : text.expandFileExplorer}>
           <span>
             <IconButton
               aria-label={isFileExplorerExpanded ? 'Collapse file explorer' : 'Expand file explorer'}
@@ -2271,9 +2345,15 @@ export function TerminalPage() {
                 commandHistory.slice(0, 30).map((item) => (
                   <MenuItem
                     key={item.id}
+                    title={text.deleteHistoryItem}
                     onClick={() => {
-                      runCommand(item.command);
+                      runCommand(item.command, { clearCurrentLine: true });
                       setHistoryMenuAnchor(null);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      deleteCommandHistoryItem(item.id);
                     }}
                   >
                     <ListItemIcon>
@@ -2320,15 +2400,15 @@ export function TerminalPage() {
                     <RefreshIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
-                <Tooltip title={text.collapseFileExplorer}>
+                <Tooltip title={text.closeFileExplorer}>
                   <IconButton aria-label="Collapse file explorer" color="primary" size="small" onClick={toggleFileExplorer}>
-                    <ChevronRightIcon className="terminal-file-collapse-icon is-expanded" fontSize="small" />
+                    <CloseIcon fontSize="small" />
                   </IconButton>
                 </Tooltip>
               </Stack>
             </Stack>
             <Typography className="terminal-file-root" title={fileTree.rootPath}>
-              {fileTree.rootPath}
+              {fileTree.pendingRootPath || fileTree.rootPath}
             </Typography>
             <Box className="terminal-file-tree">{renderFileTreeEntries(fileTree.rootPath)}</Box>
           </Box>
@@ -3203,6 +3283,14 @@ export function TerminalPage() {
           </Tooltip>
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        autoHideDuration={4200}
+        message={fileViewMessage}
+        open={Boolean(fileViewMessage)}
+        onClose={() => setFileViewMessage('')}
+      />
     </Box>
   );
 }

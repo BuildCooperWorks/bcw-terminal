@@ -435,13 +435,13 @@ export function useBcwTerminal(settings: TerminalSettings) {
     [createSession, selectSession],
   );
 
-  const sendCommand = useCallback(async (command: string) => {
+  const sendCommand = useCallback(async (command: string, options?: { clearCurrentLine?: boolean }) => {
     const sessionId = activeIdRef.current;
     if (!sessionId) {
       return { executed: false, missingVariables: [] };
     }
 
-    const result = await window.bcwTerminal.executeCommand(sessionId, command);
+    const result = await window.bcwTerminal.executeCommand(sessionId, command, options);
     if (!result.executed) {
       return result;
     }

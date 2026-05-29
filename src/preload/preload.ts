@@ -3,6 +3,7 @@ import type {
   AppUpdateState,
   CommandVariableInput,
   DirectoryListing,
+  FileViewCheck,
   TerminalCwdEvent,
   TerminalExitEvent,
   TerminalOutputEvent,
@@ -13,8 +14,8 @@ const terminalApi = {
   checkForAppUpdate: () => ipcRenderer.invoke('app:update:check'),
   createSession: () => ipcRenderer.invoke('terminal:create-session'),
   deleteCommandVariable: (id: string) => ipcRenderer.invoke('command-variables:delete', id),
-  executeCommand: (sessionId: string, command: string) =>
-    ipcRenderer.invoke('terminal:execute-command', { sessionId, command }),
+  executeCommand: (sessionId: string, command: string, options?: { clearCurrentLine?: boolean }) =>
+    ipcRenderer.invoke('terminal:execute-command', { sessionId, command, options }),
   runSequence: (sessionId: string, steps: TerminalSequenceStep[]) =>
     ipcRenderer.invoke('terminal:run-sequence', { sessionId, steps }),
   getAppUpdateState: async () => {
@@ -38,6 +39,8 @@ const terminalApi = {
       return { alwaysOnTop: false };
     }
   },
+  canViewFileInTerminal: (filePath: string): Promise<FileViewCheck> =>
+    ipcRenderer.invoke('filesystem:can-view-file-in-terminal', filePath),
   loadCommandConfigFile: () => ipcRenderer.invoke('command-config:load-file'),
   listCommandVariables: () => ipcRenderer.invoke('command-variables:list'),
   listDirectory: (directoryPath: string): Promise<DirectoryListing> =>

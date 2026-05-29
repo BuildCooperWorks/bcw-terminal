@@ -32,3 +32,22 @@
 
 - シークレット変数は保存時に暗号化されますが、送信先のプログラムが入力内容をエコー表示した場合はターミナル画面や保存した出力に残る可能性があります。
 - 操作シーケンスはローカル端末内の対話操作補助です。SSH や sudo などの認証先が入力をどう扱うかは接続先の挙動に依存します。
+
+## File Explorer Sidebar
+
+- Added a collapsible file explorer sidebar that can be opened from the toolbar folder button.
+- The sidebar is closed by default and does not read directory contents while closed.
+- When opened, it reads the active terminal working directory and keeps the previous listing visible until the new listing is ready to avoid flicker.
+- Local Windows directories are read through Electron main-process filesystem APIs.
+- WSL prompts are detected and represented as `wsl:<path>` roots. WSL directory listings are read through `wsl.exe --exec /bin/sh`.
+- On first entering WSL from a mounted Windows home path such as `/mnt/c/Users/<user>`, the terminal automatically runs `cd ~` so the sidebar starts at the Linux home directory.
+- Clicking a directory in the sidebar changes the active terminal working directory. PowerShell uses `Set-Location -LiteralPath`; WSL uses `cd`.
+- Right-clicking a file sends a terminal viewer command. PowerShell uses `Get-Content -LiteralPath ... | more`; WSL uses `cat -- ... | more`.
+- Binary-looking files are skipped before viewing, and the reason is displayed with a Snackbar.
+- While paged output such as `more` is active, prompt detection only updates the sidebar path when the output tail is an actual prompt, preventing accidental path changes from file contents.
+
+## Command History Fixes
+
+- History items can be deleted with right-click without confirmation.
+- History replay clears the current input line before sending the command.
+- The clear-line sequence is shell-aware: PowerShell uses Escape and WSL/bash uses Ctrl+U.

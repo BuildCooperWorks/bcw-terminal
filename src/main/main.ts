@@ -13,9 +13,10 @@ import {
 } from 'electron';
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch';
 import { autoUpdater } from 'electron-updater';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
 const isDevMode = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -29,6 +30,8 @@ const TERMINAL_OUTPUT = 'terminal:output';
 const TERMINAL_CWD = 'terminal:cwd';
 const TERMINAL_EXIT = 'terminal:exit';
 const APP_UPDATE_STATUS = 'app:update-status';
+const execFileAsync = promisify(execFile);
+const WSL_PATH_PREFIX = 'wsl:';
 
 type TerminalSession = {
   id: string;
@@ -36,6 +39,7 @@ type TerminalSession = {
   cwd: string;
   shell: pty.IPty | null;
   outputBuffer: string;
+  autoChangedWslHome: boolean;
 };
 
 type AppLocale = 'ja' | 'en';
@@ -104,6 +108,34 @@ type FileSystemEntry = {
   type: 'directory' | 'file';
 };
 
+const TEXT_FILE_EXTENSIONS = new Set([
+  '.bat',
+  '.cmd',
+  '.conf',
+  '.config',
+  '.css',
+  '.csv',
+  '.env',
+  '.gitignore',
+  '.html',
+  '.ini',
+  '.js',
+  '.json',
+  '.jsx',
+  '.log',
+  '.md',
+  '.mjs',
+  '.ps1',
+  '.py',
+  '.sh',
+  '.ts',
+  '.tsx',
+  '.txt',
+  '.xml',
+  '.yaml',
+  '.yml',
+]);
+
 let mainWindow: BrowserWindow | null = null;
 let sessionCounter = 0;
 let appLocale: AppLocale = 'ja';
@@ -171,7 +203,65 @@ function getAppIconPath() {
 }
 
 function stripAnsi(value: string) {
-  return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1B[@-_]/g, '');
+}
+
+function detectPromptCwd(output: string) {
+  const tail = output.trimEnd();
+  const powerShellMatch = tail.match(/(?:^|\n)PS\s+([^>\r\n]+)>\s*$/);
+  if (powerShellMatch?.[1]) {
+    return powerShellMatch[1];
+  }
+
+  const wslPromptMatch = tail.match(/(?:^|\n)[^\s@]+@[^:\r\n]+:([^\r\n]+?)[#$]\s*$/);
+  if (wslPromptMatch?.[1]) {
+    return toWslDisplayPath(wslPromptMatch[1]);
+  }
+
+  return null;
+}
+
+function toWslDisplayPath(value: string) {
+  const trimmed = value.trim();
+  if (trimmed === '~' || trimmed.startsWith('~/')) {
+    return `${WSL_PATH_PREFIX}${trimmed}`;
+  }
+
+  if (trimmed.startsWith('/')) {
+    return `${WSL_PATH_PREFIX}${trimmed}`;
+  }
+
+  return null;
+}
+
+function fromWslDisplayPath(value: string) {
+  return value.startsWith(WSL_PATH_PREFIX) ? value.slice(WSL_PATH_PREFIX.length) : value;
+}
+
+function isWslDisplayPath(value: string) {
+  return value.startsWith(WSL_PATH_PREFIX);
+}
+
+function isMountedWindowsHomePath(value: string) {
+  return /^wsl:\/mnt\/[a-z]\/Users\/[^/]+\/?$/i.test(value);
+}
+
+function joinWslPath(basePath: string, name: string) {
+  const normalizedBase = basePath === '/' ? '' : basePath.replace(/\/+$/, '');
+  return `${WSL_PATH_PREFIX}${normalizedBase}/${name}`;
+}
+
+function normalizeWslCommandPath(value: string) {
+  if (value === '~') {
+    return process.env.USERNAME ? `/home/${process.env.USERNAME}` : value;
+  }
+  if (value.startsWith('~/')) {
+    return process.env.USERNAME ? `/home/${process.env.USERNAME}/${value.slice(2)}` : value;
+  }
+  return value;
 }
 
 function sendToRenderer(channel: string, payload: unknown) {
@@ -521,6 +611,10 @@ function getReadableAutoUpdateError(error: Error) {
 async function listDirectory(directoryPath: string) {
   const targetPath = typeof directoryPath === 'string' && directoryPath.trim() ? directoryPath : getDefaultStartupCwd();
 
+  if (isWslDisplayPath(targetPath)) {
+    return listWslDirectory(targetPath);
+  }
+
   try {
     const entries = await fs.promises.readdir(targetPath, { withFileTypes: true });
     const visibleEntries = entries
@@ -547,6 +641,175 @@ async function listDirectory(directoryPath: string) {
       entries: [],
       error: error instanceof Error ? error.message : String(error),
       path: targetPath,
+    };
+  }
+}
+
+async function listWslDirectory(displayPath: string) {
+  const wslPath = normalizeWslCommandPath(fromWslDisplayPath(displayPath));
+
+  try {
+    const { stdout } = await execFileAsync(
+      'wsl.exe',
+      [
+        '--exec',
+        '/bin/sh',
+        '-c',
+        'cd "$1" || exit 1; for item in * .[!.]* ..?*; do [ -e "$item" ] || continue; [ -d "$item" ] && printf "d\\t%s\\n" "$item"; [ -f "$item" ] && printf "f\\t%s\\n" "$item"; done',
+        'bcw-list',
+        wslPath,
+      ],
+      {
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      },
+    );
+
+    const entries = stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map<FileSystemEntry | null>((line) => {
+        const [kind, ...nameParts] = line.split('\t');
+        const name = nameParts.join('\t');
+        if (!name || (kind !== 'd' && kind !== 'f')) {
+          return null;
+        }
+
+        return {
+          name,
+          path: joinWslPath(wslPath, name),
+          type: kind === 'd' ? 'directory' : 'file',
+        };
+      })
+      .filter((entry): entry is FileSystemEntry => Boolean(entry))
+      .sort((left, right) => {
+        if (left.type !== right.type) {
+          return left.type === 'directory' ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+      })
+      .slice(0, 500);
+
+    return {
+      entries,
+      path: displayPath,
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      error: error instanceof Error ? error.message : String(error),
+      path: displayPath,
+    };
+  }
+}
+
+async function canViewFileInTerminal(filePath: string) {
+  if (typeof filePath !== 'string' || !filePath.trim()) {
+    return { viewable: false, reason: 'invalid-path' };
+  }
+
+  if (isWslDisplayPath(filePath)) {
+    return canViewWslFileInTerminal(filePath);
+  }
+
+  let handle: fs.promises.FileHandle | undefined;
+
+  try {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile()) {
+      return { viewable: false, reason: 'not-file' };
+    }
+
+    if (stats.size === 0) {
+      return { viewable: true };
+    }
+
+    handle = await fs.promises.open(filePath, 'r');
+    const sampleLength = Math.min(stats.size, 8192);
+    const buffer = Buffer.alloc(sampleLength);
+    const { bytesRead } = await handle.read(buffer, 0, sampleLength, 0);
+    const sample = buffer.subarray(0, bytesRead);
+    const extension = path.extname(filePath).toLowerCase();
+    const basename = path.basename(filePath).toLowerCase();
+    const knownTextFile = TEXT_FILE_EXTENSIONS.has(extension) || TEXT_FILE_EXTENSIONS.has(`.${basename}`);
+
+    const hasUtf8Bom = sample[0] === 0xef && sample[1] === 0xbb && sample[2] === 0xbf;
+    const hasUtf16LeBom = sample[0] === 0xff && sample[1] === 0xfe;
+    const hasUtf16BeBom = sample[0] === 0xfe && sample[1] === 0xff;
+    if (hasUtf8Bom || hasUtf16LeBom || hasUtf16BeBom) {
+      return { viewable: true };
+    }
+
+    let controlCount = 0;
+    let nullCount = 0;
+    for (const byte of sample) {
+      if (byte === 0) {
+        nullCount += 1;
+        continue;
+      }
+
+      const isTextControl = byte === 9 || byte === 10 || byte === 13 || byte === 12 || byte === 8;
+      if (byte < 32 && !isTextControl) {
+        controlCount += 1;
+      }
+    }
+
+    if (knownTextFile && nullCount / sample.length < 0.55) {
+      return { viewable: true };
+    }
+
+    if (nullCount > 0) {
+      return { viewable: false, reason: 'binary-file' };
+    }
+
+    return {
+      viewable: sample.length === 0 || controlCount / sample.length < 0.08,
+      reason: controlCount / Math.max(sample.length, 1) < 0.08 ? undefined : 'binary-file',
+    };
+  } catch (error) {
+    return {
+      viewable: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function canViewWslFileInTerminal(displayPath: string) {
+  const wslPath = normalizeWslCommandPath(fromWslDisplayPath(displayPath));
+  const extension = path.posix.extname(wslPath).toLowerCase();
+  const basename = path.posix.basename(wslPath).toLowerCase();
+  const knownTextFile = TEXT_FILE_EXTENSIONS.has(extension) || TEXT_FILE_EXTENSIONS.has(`.${basename}`);
+
+  try {
+    await execFileAsync('wsl.exe', ['--exec', '/usr/bin/test', '-f', wslPath], {
+      windowsHide: true,
+    });
+
+    if (knownTextFile) {
+      return { viewable: true };
+    }
+
+    try {
+      await execFileAsync('wsl.exe', ['--exec', '/usr/bin/test', '-s', wslPath], {
+        windowsHide: true,
+      });
+    } catch {
+      return { viewable: true };
+    }
+
+    await execFileAsync('wsl.exe', ['--exec', '/bin/grep', '-Iq', '.', wslPath], {
+      windowsHide: true,
+    });
+
+    return { viewable: true };
+  } catch (error) {
+    const exitCode = typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : null;
+    return {
+      viewable: false,
+      reason: exitCode === 1 ? 'binary-file' : 'not-file',
     };
   }
 }
@@ -676,18 +939,34 @@ function spawnShell(session: Pick<TerminalSession, 'id' | 'title' | 'cwd'>) {
 
   shell.onData((output) => {
     const nextSession = sessions.get(session.id);
+    let cleanTail = stripAnsi(output);
     if (nextSession) {
       nextSession.outputBuffer = `${nextSession.outputBuffer}${stripAnsi(output)}`.slice(-20_000);
+      cleanTail = nextSession.outputBuffer;
     }
     sendToRenderer(TERMINAL_OUTPUT, { sessionId: session.id, output });
     notifySequenceWaiters(session.id);
 
-    const promptMatch = stripAnsi(output).match(/PS\s+(.+?)>\s*$/m);
-    if (promptMatch?.[1]) {
-      if (nextSession) {
-        nextSession.cwd = promptMatch[1];
+    const nextCwd = detectPromptCwd(cleanTail);
+
+    if (nextCwd) {
+      if (
+        nextSession &&
+        !nextSession.autoChangedWslHome &&
+        isWslDisplayPath(nextCwd) &&
+        isMountedWindowsHomePath(nextCwd)
+      ) {
+        nextSession.autoChangedWslHome = true;
+        nextSession.cwd = `${WSL_PATH_PREFIX}~`;
+        sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: nextSession.cwd });
+        shell.write('cd ~\r');
+        return;
       }
-      sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: promptMatch[1] });
+
+      if (nextSession) {
+        nextSession.cwd = nextCwd;
+      }
+      sendToRenderer(TERMINAL_CWD, { sessionId: session.id, cwd: nextCwd });
     }
   });
 
@@ -760,7 +1039,7 @@ function createSession() {
     cwd: defaultCwd,
   };
   const shell = spawnShell(sessionBase);
-  const session: TerminalSession = { ...sessionBase, shell, outputBuffer: '' };
+  const session: TerminalSession = { ...sessionBase, shell, outputBuffer: '', autoChangedWslHome: false };
 
   sessions.set(session.id, session);
 
@@ -773,12 +1052,15 @@ function createSession() {
 
 ipcMain.handle('terminal:create-session', () => createSession());
 ipcMain.handle('filesystem:list-directory', (_event, directoryPath: string) => listDirectory(directoryPath));
+ipcMain.handle('filesystem:can-view-file-in-terminal', (_event, filePath: string) => canViewFileInTerminal(filePath));
 
 ipcMain.on('terminal:data', (_event, payload: { sessionId: string; data: string }) => {
   sessions.get(payload.sessionId)?.shell?.write(payload.data);
 });
 
-ipcMain.handle('terminal:execute-command', (_event, payload: { sessionId: string; command: string }) => {
+ipcMain.handle(
+  'terminal:execute-command',
+  (_event, payload: { sessionId: string; command: string; options?: { clearCurrentLine?: boolean } }) => {
   const session = sessions.get(payload.sessionId);
   if (!session?.shell) {
     return {
@@ -795,12 +1077,17 @@ ipcMain.handle('terminal:execute-command', (_event, payload: { sessionId: string
     };
   }
 
+  if (payload.options?.clearCurrentLine) {
+    session.shell.write(isWslDisplayPath(session.cwd) ? '\x15' : '\x1b');
+  }
+
   session.shell.write(`${resolved.command}\r`);
   return {
     executed: true,
     missingVariables: [],
   };
-});
+  },
+);
 
 ipcMain.handle(
   'terminal:run-sequence',
