@@ -251,6 +251,7 @@ const LOCALE_TEXT = {
     sequenceDelayMs: 'Delay after send (ms)',
     sequenceDescription: 'Description',
     sequenceInput: 'Input',
+    sequenceInsertVariable: 'Insert variable',
     sequenceManager: 'Sequence manager',
     sequenceManagerDescription: 'Register interactive terminal flows such as WSL login, SSH, and password input.',
     sequenceMenu: 'Sequences',
@@ -401,6 +402,7 @@ const LOCALE_TEXT = {
     sequenceDelayMs: '送信後の待機(ms)',
     sequenceDescription: '説明',
     sequenceInput: '送信する文字列',
+    sequenceInsertVariable: '変数を挿入',
     sequenceManager: '操作シーケンス管理',
     sequenceManagerDescription: 'WSL 起動、SSH、パスワード入力などの対話操作を手順として登録します。',
     sequenceMenu: '操作シーケンス',
@@ -983,6 +985,7 @@ export function TerminalPage() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const mkdirInputRef = useRef<HTMLInputElement | null>(null);
   const previousSessionCommandsRef = useRef<Record<string, string>>({});
+  const sequenceInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandManagerOpen, setCommandManagerOpen] = useState(false);
@@ -1554,6 +1557,31 @@ export function TerminalPage() {
         sequence.id === id ? updater(sequence) : sequence,
       ),
     }));
+  };
+
+  const handleInsertSequenceVariable = (index: number, name: string) => {
+    if (!name) {
+      return;
+    }
+    const reference = toVariableReference(name);
+    const inputEl = sequenceInputRefs.current[index];
+    const hasFocus = Boolean(inputEl) && document.activeElement === inputEl;
+    const start = hasFocus ? inputEl!.selectionStart : null;
+    const end = hasFocus ? inputEl!.selectionEnd : null;
+    updateSequenceStep(index, (current) => {
+      const value = current.input ?? '';
+      if (start !== null && end !== null) {
+        return { ...current, input: value.slice(0, start) + reference + value.slice(end) };
+      }
+      return { ...current, input: value + reference };
+    });
+    if (inputEl && start !== null) {
+      const caret = start + reference.length;
+      requestAnimationFrame(() => {
+        inputEl.focus();
+        inputEl.setSelectionRange(caret, caret);
+      });
+    }
   };
 
   const handleCreateOperationSequence = () => {
@@ -3078,14 +3106,35 @@ export function TerminalPage() {
                           updateSequenceStep(index, (current) => ({ ...current, waitFor: event.target.value }))
                         }
                       />
-                      <TextField
-                        label={text.sequenceInput}
-                        size="small"
-                        value={step.input}
-                        onChange={(event) =>
-                          updateSequenceStep(index, (current) => ({ ...current, input: event.target.value }))
-                        }
-                      />
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <TextField
+                          label={text.sequenceInput}
+                          size="small"
+                          value={step.input}
+                          fullWidth
+                          inputRef={(el: HTMLInputElement | null) => {
+                            sequenceInputRefs.current[index] = el;
+                          }}
+                          onChange={(event) =>
+                            updateSequenceStep(index, (current) => ({ ...current, input: event.target.value }))
+                          }
+                        />
+                        <TextField
+                          select
+                          label={text.sequenceInsertVariable}
+                          size="small"
+                          value=""
+                          sx={{ minWidth: 150 }}
+                          disabled={commandVariables.length === 0}
+                          onChange={(event) => handleInsertSequenceVariable(index, event.target.value)}
+                        >
+                          {commandVariables.map((variable) => (
+                            <MenuItem key={variable.id} value={variable.name}>
+                              {variable.name} ({variable.kind === 'secret' ? text.variableKindSecret : text.variableKindText})
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      </Stack>
                       <Stack
                         className="terminal-sequence-step-footer"
                         direction={{ xs: 'column', sm: 'row' }}
