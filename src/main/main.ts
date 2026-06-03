@@ -80,6 +80,12 @@ type SmartAppControlState = {
   detail?: string;
 };
 
+type AdminPrivilegeState = {
+  canRestartElevated: boolean;
+  detail?: string;
+  isAdmin: boolean;
+};
+
 type AppUpdateState = {
   error?: string;
   progress?: number;
@@ -164,6 +170,7 @@ let sessionCounter = 0;
 let appLocale: AppLocale = 'ja';
 const sessions = new Map<string, TerminalSession>();
 const sequenceWaiters = new Map<string, Set<() => void>>();
+let terminalShutdownStarted = false;
 const DEFAULT_WINDOW_STATE: WindowStateSnapshot = {
   width: 1240,
   height: 780,
@@ -597,6 +604,88 @@ function delay(ms: number) {
   });
 }
 
+function closeTerminalSessions(timeoutMs = 1500) {
+  if (terminalShutdownStarted) {
+    return Promise.resolve();
+  }
+
+  terminalShutdownStarted = true;
+  const closingSessions = [...sessions.values()].filter((session) => session.shell);
+  if (closingSessions.length === 0) {
+    sessions.clear();
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    const pendingIds = new Set(closingSessions.map((session) => session.id));
+    let resolved = false;
+    let forceKillTimer: NodeJS.Timeout | undefined;
+
+    const finish = () => {
+      if (resolved) {
+        return;
+      }
+
+      resolved = true;
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+      }
+      sessions.clear();
+      resolve();
+    };
+
+    const timeoutTimer = setTimeout(finish, timeoutMs + 900);
+
+    forceKillTimer = setTimeout(() => {
+      for (const sessionId of pendingIds) {
+        const session = sessions.get(sessionId);
+        const shell = session?.shell;
+        if (session) {
+          session.shell = null;
+        }
+        try {
+          shell?.kill();
+        } catch {
+          // Native PTY cleanup is best-effort during app shutdown.
+        }
+      }
+      clearTimeout(timeoutTimer);
+      finish();
+    }, timeoutMs);
+
+    for (const session of closingSessions) {
+      const shell = session.shell;
+      if (!shell) {
+        pendingIds.delete(session.id);
+        continue;
+      }
+
+      shell.onExit(() => {
+        pendingIds.delete(session.id);
+        const nextSession = sessions.get(session.id);
+        if (nextSession) {
+          nextSession.shell = null;
+        }
+        if (pendingIds.size === 0) {
+          clearTimeout(timeoutTimer);
+          finish();
+        }
+      });
+
+      try {
+        shell.write('exit\r');
+      } catch {
+        pendingIds.delete(session.id);
+      }
+    }
+
+    if (pendingIds.size === 0) {
+      clearTimeout(timeoutTimer);
+      finish();
+    }
+  });
+}
+
 function notifySequenceWaiters(sessionId: string) {
   const waiters = sequenceWaiters.get(sessionId);
   if (!waiters) {
@@ -764,6 +853,86 @@ function getReadableAutoUpdateError(error: Error) {
   const withoutHeaders = message.split(/\r?\nHeaders:/)[0] ?? message;
   const singleLine = withoutHeaders.replace(/\s+/g, ' ').trim();
   return singleLine.length > 280 ? `${singleLine.slice(0, 277)}...` : singleLine;
+}
+
+function quotePowerShellSingle(value: string) {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function getRelaunchArgs() {
+  return process.defaultApp ? process.argv.slice(1) : process.argv.slice(1);
+}
+
+function getAdminPrivilegeState(): AdminPrivilegeState {
+  if (process.platform !== 'win32') {
+    return { canRestartElevated: false, detail: 'non-windows', isAdmin: false };
+  }
+
+  try {
+    const output = execFileSync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      "[Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent() | ForEach-Object { $_.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }",
+    ], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+
+    return {
+      canRestartElevated: true,
+      isAdmin: output.trim().toLowerCase() === 'true',
+    };
+  } catch (error) {
+    return {
+      canRestartElevated: true,
+      detail: error instanceof Error ? error.message : String(error),
+      isAdmin: false,
+    };
+  }
+}
+
+async function restartElevated() {
+  if (process.platform !== 'win32') {
+    return { started: false, error: 'Administrator restart is only supported on Windows.' };
+  }
+
+  if (getAdminPrivilegeState().isAdmin) {
+    return { started: false, alreadyAdmin: true };
+  }
+
+  const args = getRelaunchArgs();
+  const command = [
+    `$file = ${quotePowerShellSingle(process.execPath)}`,
+    `$arguments = @(${args.map(quotePowerShellSingle).join(', ')})`,
+    "$startArgs = @{ FilePath = $file; Verb = 'RunAs' }",
+    "if ($arguments.Count -gt 0) { $startArgs.ArgumentList = $arguments }",
+    'Start-Process @startArgs',
+  ].join('; ');
+
+  try {
+    await execFileAsync('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      command,
+    ], {
+      windowsHide: true,
+    });
+
+    await closeTerminalSessions();
+    app.quit();
+    return { started: true };
+  } catch (error) {
+    return {
+      started: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function listDirectory(directoryPath: string, sessionId?: string) {
@@ -1535,6 +1704,8 @@ ipcMain.handle('app:set-locale', (_event, locale: AppLocale) => {
   updateApplicationMenu(appLocale);
 });
 
+ipcMain.handle('system:get-admin-privilege-state', () => getAdminPrivilegeState());
+ipcMain.handle('system:restart-elevated', () => restartElevated());
 ipcMain.handle('system:get-smart-app-control-state', () => getSmartAppControlState());
 ipcMain.handle('app:update:get-state', () => appUpdateState);
 ipcMain.handle('app:update:check', async () => {
@@ -1739,12 +1910,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  for (const session of sessions.values()) {
-    session.shell?.kill();
-  }
-  sessions.clear();
-
   if (process.platform !== 'darwin') {
-    app.quit();
+    void closeTerminalSessions().finally(() => {
+      app.quit();
+    });
   }
 });

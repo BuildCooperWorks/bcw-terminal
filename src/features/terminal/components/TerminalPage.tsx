@@ -21,6 +21,7 @@ import LanIcon from '@mui/icons-material/Lan';
 import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import SettingsIcon from '@mui/icons-material/Settings';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -52,6 +53,7 @@ import {
   Typography,
 } from '@mui/material';
 import type {
+  AdminPrivilegeState,
   CommandVariableKind,
   CommandVariableSnapshot,
   FileSystemEntry,
@@ -271,6 +273,9 @@ const LOCALE_TEXT = {
     resetSettings: 'Reset settings',
     resetSettingsTooltip:
       'Reset all settings to defaults: language, fonts, terminal colors, sidebar options, button visibility, and command groups.',
+    restartAsAdmin: 'Restart as administrator',
+    restartAsAdminDescription: 'Restart BcwTerminal with UAC elevation. New PowerShell sessions will run as administrator.',
+    restartAsAdminFailed: 'Could not restart as administrator.',
     refreshFileTree: 'Refresh file tree',
     runAgain: 'Run',
     variableDeleteTooltip: 'Delete this variable.',
@@ -422,6 +427,9 @@ const LOCALE_TEXT = {
     resetSettings: '設定をリセット',
     resetSettingsTooltip:
       '表示言語・フォント・ターミナル色設定・サイドバー設定・ボタン表示・コマンド設定を初期値に戻します。',
+    restartAsAdmin: '管理者として再起動',
+    restartAsAdminDescription: 'UAC で BcwTerminal を昇格して再起動します。新しい PowerShell は管理者権限で動きます。',
+    restartAsAdminFailed: '管理者として再起動できませんでした。',
     refreshFileTree: 'ファイルツリーを更新',
     runAgain: '再実行',
     variableDeleteTooltip: 'この変数を削除します。',
@@ -1005,6 +1013,10 @@ export function TerminalPage() {
   const [customMenuTargetId, setCustomMenuTargetId] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<PageSettings>(loadSettings);
+  const [adminPrivilege, setAdminPrivilege] = useState<AdminPrivilegeState>({
+    canRestartElevated: false,
+    isAdmin: true,
+  });
   const [smartAppControl, setSmartAppControl] = useState<SmartAppControlStatus>({ status: 'unknown' });
   const [appUpdate, setAppUpdate] = useState<AppUpdateStatus>({ supported: false, status: 'idle' });
   const [commandHistory, setCommandHistory] = useState<CommandHistoryItem[]>(loadHistory);
@@ -1228,6 +1240,19 @@ export function TerminalPage() {
 
   useEffect(() => {
     refreshCommandVariables();
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void window.bcwTerminal.getAdminPrivilegeState().then((state) => {
+      if (!active) {
+        return;
+      }
+      setAdminPrivilege(state);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -1700,6 +1725,20 @@ export function TerminalPage() {
         status: 'error',
       }));
     }
+  };
+
+  const handleRestartElevated = async () => {
+    const result = await window.bcwTerminal.restartElevated();
+    if (result.started) {
+      return;
+    }
+
+    if (result.alreadyAdmin) {
+      setAdminPrivilege((current) => ({ ...current, isAdmin: true }));
+      return;
+    }
+
+    setFileViewMessage(result.error || text.restartAsAdminFailed);
   };
 
   const handleStopSession = (session: TerminalSessionView) => {
@@ -2642,6 +2681,21 @@ export function TerminalPage() {
             ) : null}
             {smartAppControl.status === 'eval' ? (
               <Typography className="terminal-settings-warning">{text.smartAppControlEvalWarning}</Typography>
+            ) : null}
+
+            {adminPrivilege.canRestartElevated && !adminPrivilege.isAdmin ? (
+              <Box>
+                <Typography className="terminal-settings-label">{text.restartAsAdmin}</Typography>
+                <Typography className="terminal-settings-description">{text.restartAsAdminDescription}</Typography>
+                <Button
+                  sx={{ mt: 1 }}
+                  variant="outlined"
+                  startIcon={<AdminPanelSettingsIcon />}
+                  onClick={() => void handleRestartElevated()}
+                >
+                  {text.restartAsAdmin}
+                </Button>
+              </Box>
             ) : null}
 
             <Box>

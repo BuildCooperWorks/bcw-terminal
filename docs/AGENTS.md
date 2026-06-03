@@ -377,3 +377,9 @@ src/
 - Prompt detection updates cwd only when terminal output ends with a real prompt, preventing `more` output from changing the sidebar path.
 - Command history replay clears the active input line before sending. PowerShell uses Escape; WSL/bash uses Ctrl+U.
 - History items can be deleted by right-clicking them without confirmation.
+
+## 38. 2026-06-04 Additional Update (Administrator Restart)
+- Added a settings action to restart BcwTerminal as administrator through Windows UAC.
+- The administrator restart action is hidden when the current app process is already elevated.
+- Added main/preload IPC for administrator privilege detection and elevated relaunch.
+- Shutdown cleanup now asks active PowerShell sessions to exit before force-killing remaining PTYs, reducing ConPTY native cleanup assertions during restart.

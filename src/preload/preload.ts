@@ -33,6 +33,13 @@ const terminalApi = {
       return { status: 'unknown' as const };
     }
   },
+  getAdminPrivilegeState: async () => {
+    try {
+      return await ipcRenderer.invoke('system:get-admin-privilege-state');
+    } catch {
+      return { canRestartElevated: false, isAdmin: false };
+    }
+  },
   getWindowState: async () => {
     try {
       return await ipcRenderer.invoke('window:get-state');
@@ -66,6 +73,7 @@ const terminalApi = {
     ipcRenderer.send('terminal:resize', { sessionId, cols, rows }),
   stop: (sessionId: string) => ipcRenderer.send('terminal:stop', sessionId),
   writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  restartElevated: () => ipcRenderer.invoke('system:restart-elevated'),
   installDownloadedAppUpdate: () => ipcRenderer.invoke('app:update:install'),
   onAppUpdateStatus: (callback: (event: AppUpdateState) => void) => {
     const listener = (_event: IpcRendererEvent, payload: AppUpdateState) => callback(payload);

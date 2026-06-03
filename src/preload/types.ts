@@ -69,6 +69,12 @@ export type SmartAppControlState = {
   detail?: string;
 };
 
+export type AdminPrivilegeState = {
+  canRestartElevated: boolean;
+  detail?: string;
+  isAdmin: boolean;
+};
+
 export type AppUpdateState = {
   error?: string;
   progress?: number;
@@ -105,6 +111,7 @@ export type TerminalApi = {
   }>;
   getAppUpdateState: () => Promise<AppUpdateState>;
   listCommandVariables: () => Promise<CommandVariableSnapshot[]>;
+  getAdminPrivilegeState: () => Promise<AdminPrivilegeState>;
   getSmartAppControlState: () => Promise<SmartAppControlState>;
   canViewFileInTerminal: (filePath: string) => Promise<FileViewCheck>;
   listDirectory: (directoryPath: string, sessionId?: string) => Promise<DirectoryListing>;
@@ -121,6 +128,7 @@ export type TerminalApi = {
   resize: (sessionId: string, cols: number, rows: number) => void;
   stop: (sessionId: string) => void;
   writeClipboardText: (text: string) => Promise<void>;
+  restartElevated: () => Promise<{ started: boolean; alreadyAdmin?: boolean; error?: string }>;
   installDownloadedAppUpdate: () => Promise<{ started: boolean }>;
   onAppUpdateStatus: (callback: (event: AppUpdateState) => void) => () => void;
   onOutput: (callback: (event: TerminalOutputEvent) => void) => () => void;
